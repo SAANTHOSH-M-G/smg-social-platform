@@ -20,8 +20,10 @@ export function ExploreGrid({ posts, onChange, onDeleted }: { posts: Post[]; onC
               onClick={() => setActivePost(post)}
               className={clsx('group relative overflow-hidden bg-paper-100 dark:bg-ink-800', large && 'col-span-2 row-span-2')}
             >
-              {cover?.media_type === 'video' ? (
-                <video src={cover.media_url} className="h-full w-full object-cover" muted />
+              {post.is_reel && post.cover_url ? (
+                <img src={post.cover_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+              ) : cover?.media_type === 'video' ? (
+                <video src={cover.media_url + '#t=0.3'} className="h-full w-full object-cover" muted preload="metadata" />
               ) : (
                 <img src={cover?.media_url} alt="" className="h-full w-full object-cover" loading="lazy" />
               )}

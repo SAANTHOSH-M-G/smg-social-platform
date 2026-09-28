@@ -4,7 +4,7 @@ import type { AppNotification } from '@/types'
 const NOTIFICATION_SELECT = `
   id, recipient_id, actor_id, type, post_id, comment_id, is_read, created_at,
   actor:profiles!notifications_actor_id_fkey(*),
-  post:posts!notifications_post_id_fkey(id, media:post_media(*))
+  post:posts!notifications_post_id_fkey(id, is_reel, cover_url, media:post_media(*))
 `
 
 export async function getNotifications(userId: string): Promise<AppNotification[]> {

@@ -31,11 +31,14 @@ export interface Post {
   location: string
   is_reel: boolean
   audio_title: string
+  cover_url: string | null
   like_count: number
   comment_count: number
   created_at: string
+  updated_at?: string
   author: Profile
   media: PostMedia[]
+  tagged_users?: Profile[]
   liked_by_me?: boolean
   saved_by_me?: boolean
 }
@@ -89,7 +92,7 @@ export interface AppNotification {
   is_read: boolean
   created_at: string
   actor?: Profile
-  post?: Pick<Post, 'id' | 'media'> | null
+  post?: (Pick<Post, 'id' | 'media' | 'cover_url'> & { is_reel: boolean }) | null
 }
 
 export interface Conversation {

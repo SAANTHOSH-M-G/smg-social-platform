@@ -61,6 +61,7 @@ create table if not exists public.posts (
   location     text default '',
   is_reel       boolean not null default false,
   audio_title  text default '',
+  cover_url     text,
   like_count    integer not null default 0,
   comment_count integer not null default 0,
   created_at    timestamptz not null default now(),
@@ -86,6 +87,7 @@ create table if not exists public.post_tagged_users (
   user_id  uuid not null references public.profiles(id) on delete cascade,
   primary key (post_id, user_id)
 );
+create index if not exists idx_post_tagged_users_user on public.post_tagged_users(user_id);
 
 -- =============================================================================
 -- HASHTAGS
@@ -486,6 +488,39 @@ drop trigger if exists trg_message_ins on public.messages;
 create trigger trg_message_ins after insert on public.messages
   for each row execute function public.bump_conversation();
 
+-- Mention notifications (@username in a caption or comment)
+create or replace function public.handle_new_mention()
+returns trigger language plpgsql security definer as $$
+begin
+  if new.mentioned_user <> new.mentioned_by then
+    insert into public.notifications (recipient_id, actor_id, type, post_id, comment_id)
+    values (new.mentioned_user, new.mentioned_by, 'mention', new.post_id, new.comment_id);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_mention_ins on public.mentions;
+create trigger trg_mention_ins after insert on public.mentions
+  for each row execute function public.handle_new_mention();
+
+-- Tagged-in-photo notifications (distinct from @mentions above)
+create or replace function public.handle_post_tag()
+returns trigger language plpgsql security definer as $$
+declare
+  tagger uuid;
+begin
+  select user_id into tagger from public.posts where id = new.post_id;
+  if tagger is not null and tagger <> new.user_id then
+    insert into public.notifications (recipient_id, actor_id, type, post_id)
+    values (new.user_id, tagger, 'mention', new.post_id, null);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_post_tag_ins on public.post_tagged_users;
+create trigger trg_post_tag_ins after insert on public.post_tagged_users
+  for each row execute function public.handle_post_tag();
+
 -- Story cleanup helper (call periodically, e.g. via pg_cron or edge function)
 create or replace function public.delete_expired_stories()
 returns void language sql security definer as $$
@@ -504,6 +539,18 @@ returns boolean language sql stable security definer as $$
       select 1 from public.follows
       where follower_id = viewer and following_id = target
     );
+$$;
+
+-- Used by the conversations/messages RLS policies below. Runs as the
+-- function owner (SECURITY DEFINER), which avoids the "infinite recursion
+-- detected in policy" error you get from a policy on conversation_members
+-- that queries conversation_members directly.
+create or replace function public.is_conversation_member(conv_id uuid, uid uuid)
+returns boolean language sql stable security definer as $$
+  select exists (
+    select 1 from public.conversation_members
+    where conversation_id = conv_id and user_id = uid
+  );
 $$;
 
 -- =============================================================================
@@ -672,19 +719,25 @@ create policy "notifications_update_own" on public.notifications for update usin
 drop policy if exists "notifications_delete_own" on public.notifications;
 create policy "notifications_delete_own" on public.notifications for delete using (auth.uid() = recipient_id);
 
--- CONVERSATIONS / MEMBERS / MESSAGES: only members can read/write
+-- CONVERSATIONS / MEMBERS / MESSAGES: only members can read/write.
+-- NOTE: membership checks go through is_conversation_member() (a SECURITY
+-- DEFINER function defined above the RLS section) rather than an inline
+-- `exists (select 1 from conversation_members ...)` subquery. Referencing the
+-- same table a policy protects, from inside that policy, causes Postgres to
+-- report "infinite recursion detected in policy" (42P17) — the function
+-- sidesteps that by running the lookup with the function owner's privileges.
 drop policy if exists "conversations_select_member" on public.conversations;
 create policy "conversations_select_member" on public.conversations for select
-  using (exists (select 1 from public.conversation_members cm where cm.conversation_id = id and cm.user_id = auth.uid()));
+  using (public.is_conversation_member(id, auth.uid()));
 drop policy if exists "conversations_insert" on public.conversations;
 create policy "conversations_insert" on public.conversations for insert with check (auth.uid() is not null);
 drop policy if exists "conversations_update_member" on public.conversations;
 create policy "conversations_update_member" on public.conversations for update
-  using (exists (select 1 from public.conversation_members cm where cm.conversation_id = id and cm.user_id = auth.uid()));
+  using (public.is_conversation_member(id, auth.uid()));
 
 drop policy if exists "conv_members_select" on public.conversation_members;
 create policy "conv_members_select" on public.conversation_members for select
-  using (exists (select 1 from public.conversation_members cm2 where cm2.conversation_id = conversation_id and cm2.user_id = auth.uid()));
+  using (public.is_conversation_member(conversation_id, auth.uid()));
 drop policy if exists "conv_members_insert" on public.conversation_members;
 create policy "conv_members_insert" on public.conversation_members for insert with check (auth.uid() is not null);
 drop policy if exists "conv_members_update_own" on public.conversation_members;
@@ -694,13 +747,10 @@ create policy "conv_members_delete_own" on public.conversation_members for delet
 
 drop policy if exists "messages_select_member" on public.messages;
 create policy "messages_select_member" on public.messages for select
-  using (exists (select 1 from public.conversation_members cm where cm.conversation_id = conversation_id and cm.user_id = auth.uid()));
+  using (public.is_conversation_member(conversation_id, auth.uid()));
 drop policy if exists "messages_insert_member" on public.messages;
 create policy "messages_insert_member" on public.messages for insert
-  with check (
-    auth.uid() = sender_id
-    and exists (select 1 from public.conversation_members cm where cm.conversation_id = conversation_id and cm.user_id = auth.uid())
-  );
+  with check (auth.uid() = sender_id and public.is_conversation_member(conversation_id, auth.uid()));
 drop policy if exists "messages_update_own" on public.messages;
 create policy "messages_update_own" on public.messages for update using (auth.uid() = sender_id);
 drop policy if exists "messages_delete_own" on public.messages;
@@ -708,7 +758,7 @@ create policy "messages_delete_own" on public.messages for delete using (auth.ui
 
 drop policy if exists "typing_status_select_member" on public.typing_status;
 create policy "typing_status_select_member" on public.typing_status for select
-  using (exists (select 1 from public.conversation_members cm where cm.conversation_id = conversation_id and cm.user_id = auth.uid()));
+  using (public.is_conversation_member(conversation_id, auth.uid()));
 drop policy if exists "typing_status_write_own" on public.typing_status;
 create policy "typing_status_write_own" on public.typing_status for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);

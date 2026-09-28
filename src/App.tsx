@@ -7,6 +7,8 @@ import { AuthLayout } from '@/layouts/AuthLayout'
 import { ProtectedRoute, GuestOnlyRoute } from '@/components/ProtectedRoute'
 import { LoginPage } from '@/pages/Login'
 import { SignupPage } from '@/pages/Signup'
+import { ForgotPasswordPage } from '@/pages/ForgotPassword'
+import { ResetPasswordPage } from '@/pages/ResetPassword'
 import { HomePage } from '@/pages/Home'
 import { ExplorePage } from '@/pages/Explore'
 import { ReelsPage } from '@/pages/Reels'
@@ -16,6 +18,7 @@ import { MessagesPage } from '@/pages/Messages'
 import { NotificationsPage } from '@/pages/Notifications'
 import { SettingsPage } from '@/pages/Settings'
 import { PostPage } from '@/pages/PostPage'
+import { ReelPage } from '@/pages/ReelPage'
 
 export default function App() {
   return (
@@ -27,6 +30,11 @@ export default function App() {
               <Route element={<GuestOnlyRoute><AuthLayout /></GuestOnlyRoute>}>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              </Route>
+
+              <Route element={<AuthLayout />}>
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
               </Route>
 
               <Route
@@ -46,6 +54,7 @@ export default function App() {
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/accounts/edit" element={<EditProfilePage />} />
                 <Route path="/p/:postId" element={<PostPage />} />
+                <Route path="/reel/:postId" element={<ReelPage />} />
                 <Route path="/:username" element={<ProfilePage />} />
               </Route>
             </Routes>

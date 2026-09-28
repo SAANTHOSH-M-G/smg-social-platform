@@ -9,6 +9,7 @@ import type { Post } from '@/types'
 import { toggleLike, toggleSave } from '@/services/posts'
 import { formatCount } from '@/utils/format'
 import { CommentSection } from './CommentSection'
+import { ShareModal } from './ShareModal'
 import { Modal } from './Common'
 
 function ReelSlide({ post, isActive, onChange }: { post: Post; isActive: boolean; onChange: (post: Post) => void }) {
@@ -16,6 +17,7 @@ function ReelSlide({ post, isActive, onChange }: { post: Post; isActive: boolean
   const videoRef = useRef<HTMLVideoElement>(null)
   const [muted, setMuted] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [commentCount, setCommentCount] = useState(post.comment_count)
   const isOwn = profile?.id === post.user_id
 
@@ -52,6 +54,7 @@ function ReelSlide({ post, isActive, onChange }: { post: Post; isActive: boolean
         <video
           ref={videoRef}
           src={media.media_url}
+          poster={post.cover_url ?? undefined}
           className="h-full w-full object-cover sm:rounded-xl"
           loop
           muted={muted}
@@ -93,7 +96,7 @@ function ReelSlide({ post, isActive, onChange }: { post: Post; isActive: boolean
             <MessageCircle size={28} />
             <span className="text-xs font-semibold">{formatCount(commentCount)}</span>
           </button>
-          <button className="flex flex-col items-center gap-1">
+          <button onClick={() => setShareOpen(true)} className="flex flex-col items-center gap-1">
             <Send size={26} />
           </button>
           <button onClick={handleSave} className="flex flex-col items-center gap-1">
@@ -107,6 +110,7 @@ function ReelSlide({ post, isActive, onChange }: { post: Post; isActive: boolean
           <CommentSection postId={post.id} onCountChange={(d) => setCommentCount((c) => c + d)} />
         </div>
       </Modal>
+      <ShareModal post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>
   )
 }

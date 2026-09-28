@@ -11,11 +11,14 @@ import {
   Trash2,
   Flag,
   Link2,
+  Pencil,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { FollowButton } from './FollowButton'
 import { ConfirmDialog } from './Common'
+import { EditPostModal } from './EditPostModal'
+import { ShareModal } from './ShareModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { Post } from '@/types'
@@ -40,6 +43,8 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [likeBurst, setLikeBurst] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   useOnClickOutside(menuRef, () => setMenuOpen(false))
@@ -88,7 +93,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
   }
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/p/${post.id}`
+    const url = `${window.location.origin}${post.is_reel ? '/reel/' : '/p/'}${post.id}`
     try {
       await navigator.clipboard.writeText(url)
       showToast('Link copied to clipboard', 'success')
@@ -137,15 +142,26 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
                 <Link2 size={16} /> Copy link
               </button>
               {isOwn ? (
-                <button
-                  onClick={() => {
-                    setMenuOpen(false)
-                    setConfirmDelete(true)
-                  }}
-                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-ember-500 hover:bg-paper-50 dark:hover:bg-ink-700"
-                >
-                  <Trash2 size={16} /> Delete post
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setEditOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-paper-50 dark:hover:bg-ink-700"
+                  >
+                    <Pencil size={16} /> Edit post
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setConfirmDelete(true)
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-ember-500 hover:bg-paper-50 dark:hover:bg-ink-700"
+                  >
+                    <Trash2 size={16} /> Delete post
+                  </button>
+                </>
               ) : (
                 <button onClick={handleReport} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-ember-500 hover:bg-paper-50 dark:hover:bg-ink-700">
                   <Flag size={16} /> Report
@@ -199,7 +215,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
         <button onClick={() => setDetailOpen(true)} className="rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800" aria-label="Comment">
           <MessageCircle size={24} />
         </button>
-        <button onClick={handleShare} className="rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800" aria-label="Share">
+        <button onClick={() => setShareOpen(true)} className="rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800" aria-label="Share">
           <Send size={24} />
         </button>
         <button onClick={handleSave} className="ml-auto rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800" aria-label="Save">
@@ -217,6 +233,19 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
             {renderCaption(post.caption)}
           </p>
         )}
+        {post.tagged_users && post.tagged_users.length > 0 && (
+          <p className="text-ink-500 dark:text-paper-200/60">
+            with{' '}
+            {post.tagged_users.map((t, i) => (
+              <span key={t.id}>
+                <Link to={`/${t.username}`} className="font-medium text-ink-900 hover:underline dark:text-paper-50">
+                  {t.username}
+                </Link>
+                {i < post.tagged_users!.length - 1 ? ', ' : ''}
+              </span>
+            ))}
+          </p>
+        )}
         {post.comment_count > 0 && (
           <button onClick={() => setDetailOpen(true)} className="text-ink-500 dark:text-paper-200/60">
             View all {formatCount(post.comment_count)} comments
@@ -225,6 +254,8 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
       </div>
 
       {detailOpen && <PostModal post={post} onClose={() => setDetailOpen(false)} onChange={onChange} onDeleted={onDeleted} />}
+      <EditPostModal post={post} open={editOpen} onClose={() => setEditOpen(false)} onSaved={(p) => onChange?.(p)} />
+      <ShareModal post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
 
       <ConfirmDialog
         open={confirmDelete}

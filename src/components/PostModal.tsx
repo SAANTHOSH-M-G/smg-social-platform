@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, X, ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { FollowButton } from './FollowButton'
 import { ConfirmDialog } from './Common'
+import { EditPostModal } from './EditPostModal'
+import { ShareModal } from './ShareModal'
 import { CommentSection } from './CommentSection'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -29,6 +31,8 @@ export function PostModal({
   const [commentCount, setCommentCount] = useState(post.comment_count)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const { showToast } = useToast()
   const isOwn = profile?.id === post.user_id
   const media = post.media[mediaIndex]
@@ -100,6 +104,15 @@ export function PostModal({
               {menuOpen && isOwn && (
                 <div className="absolute right-0 top-9 z-20 w-40 overflow-hidden rounded-xl border border-paper-200 bg-white py-1 shadow-soft dark:border-ink-700 dark:bg-ink-800">
                   <button
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setEditOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-paper-50 dark:hover:bg-ink-700"
+                  >
+                    <Pencil size={15} /> Edit post
+                  </button>
+                  <button
                     onClick={() => setConfirmDelete(true)}
                     className="w-full px-4 py-2.5 text-left text-sm text-ember-500 hover:bg-paper-50 dark:hover:bg-ink-700"
                   >
@@ -110,13 +123,30 @@ export function PostModal({
             </div>
           </div>
 
-          {post.caption && (
+          {(post.caption || (post.tagged_users && post.tagged_users.length > 0)) && (
             <div className="flex gap-2.5 border-b border-paper-200 p-3.5 text-sm dark:border-ink-700">
               <Avatar src={post.author.avatar_url} name={post.author.username} size="sm" />
-              <p>
-                <span className="mr-1.5 font-semibold">{post.author.username}</span>
-                {post.caption}
-              </p>
+              <div>
+                {post.caption && (
+                  <p>
+                    <span className="mr-1.5 font-semibold">{post.author.username}</span>
+                    {post.caption}
+                  </p>
+                )}
+                {post.tagged_users && post.tagged_users.length > 0 && (
+                  <p className="mt-1 text-ink-500 dark:text-paper-200/60">
+                    with{' '}
+                    {post.tagged_users.map((t, i) => (
+                      <span key={t.id}>
+                        <Link to={`/${t.username}`} className="font-medium text-ink-900 hover:underline dark:text-paper-50" onClick={onClose}>
+                          {t.username}
+                        </Link>
+                        {i < post.tagged_users!.length - 1 ? ', ' : ''}
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -132,9 +162,9 @@ export function PostModal({
               <span className="p-2 text-ink-400">
                 <MessageCircle size={24} />
               </span>
-              <span className="p-2 text-ink-400">
+              <button onClick={() => setShareOpen(true)} className="rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800">
                 <Send size={24} />
-              </span>
+              </button>
               <button onClick={handleSave} className="ml-auto rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800">
                 <Bookmark size={24} className={clsx(post.saved_by_me && 'fill-ink-900 dark:fill-paper-50')} />
               </button>
@@ -155,6 +185,8 @@ export function PostModal({
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       />
+      <EditPostModal post={post} open={editOpen} onClose={() => setEditOpen(false)} onSaved={(p) => onChange?.(p)} />
+      <ShareModal post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>,
     document.body
   )

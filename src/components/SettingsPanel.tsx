@@ -19,7 +19,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useToast } from '@/contexts/ToastContext'
 import { Avatar } from './Avatar'
-import { ConfirmDialog } from './Common'
+import { ConfirmDialog, Spinner } from './Common'
 import { getBlockedUsers, unblockUser } from '@/services/blocked'
 import type { Profile } from '@/types'
 import { supabase } from '@/lib/supabase'
@@ -92,28 +92,78 @@ export function SettingsPanel() {
 }
 
 function PasswordSection() {
+  const { session } = useAuth()
   const { showToast } = useToast()
+  const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = async () => {
-    if (password.length < 6) return showToast('Password must be at least 6 characters', 'error')
-    if (password !== confirm) return showToast('Passwords do not match', 'error')
+    setError('')
+    if (!currentPassword) return setError('Enter your current password to continue.')
+    if (password.length < 6) return setError('New password must be at least 6 characters.')
+    if (password === currentPassword) return setError('New password must be different from your current password.')
+    if (password !== confirm) return setError('New passwords do not match.')
+
+    const email = session?.user.email
+    if (!email) {
+      setError('Could not find your account email. Try logging out and back in.')
+      return
+    }
+
     setSaving(true)
-    const { error } = await supabase.auth.updateUser({ password })
-    setSaving(false)
-    if (error) return showToast(error.message, 'error')
-    setPassword('')
-    setConfirm('')
-    showToast('Password updated', 'success')
+    try {
+      // Real re-authentication, not a fake "verification screen": we ask
+      // Supabase Auth to sign in again with the password the person just
+      // typed. If it's wrong, this call fails and we never touch the
+      // password field — a valid session alone is never enough on its own
+      // to silently change the password.
+      const { error: reauthError } = await supabase.auth.signInWithPassword({ email, password: currentPassword })
+      if (reauthError) {
+        setError('Current password is incorrect.')
+        return
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({ password })
+      if (updateError) {
+        if (updateError.message.toLowerCase().includes('session')) {
+          setError('Your session has expired. Please log out and back in, then try again.')
+        } else {
+          setError(updateError.message)
+        }
+        return
+      }
+
+      setCurrentPassword('')
+      setPassword('')
+      setConfirm('')
+      showToast('Password updated', 'success')
+    } catch {
+      setError('Something went wrong. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <div className="max-w-sm space-y-3">
       <h2 className="font-display text-lg font-semibold">Change password</h2>
+      <p className="text-xs text-ink-500 dark:text-paper-200/60">
+        For your security, you must re-enter your current password to set a new one.
+      </p>
       <input
         type="password"
+        autoComplete="current-password"
+        value={currentPassword}
+        onChange={(e) => setCurrentPassword(e.target.value)}
+        placeholder="Current password"
+        className="w-full rounded-lg border border-paper-200 bg-transparent p-2.5 text-sm outline-none focus:border-signal-400 dark:border-ink-700"
+      />
+      <input
+        type="password"
+        autoComplete="new-password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         placeholder="New password"
@@ -121,17 +171,19 @@ function PasswordSection() {
       />
       <input
         type="password"
+        autoComplete="new-password"
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         placeholder="Confirm new password"
         className="w-full rounded-lg border border-paper-200 bg-transparent p-2.5 text-sm outline-none focus:border-signal-400 dark:border-ink-700"
       />
+      {error && <p className="text-sm font-medium text-ember-500">{error}</p>}
       <button
         onClick={handleSave}
         disabled={saving}
-        className="rounded-lg bg-signal-500 px-4 py-2 text-sm font-semibold text-white hover:bg-signal-600 disabled:opacity-60"
+        className="flex items-center gap-2 rounded-lg bg-signal-500 px-4 py-2 text-sm font-semibold text-white hover:bg-signal-600 disabled:opacity-60"
       >
-        Update password
+        {saving && <Spinner size={16} />} Update password
       </button>
     </div>
   )

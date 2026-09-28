@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Heart, MessageCircle, UserPlus, AtSign, Send, Check, X } from 'lucide-react'
+import { Heart, MessageCircle, UserPlus, AtSign, Send, Check, X, ImageOff } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { EmptyState } from './Common'
 import { useAuth } from '@/contexts/AuthContext'
@@ -34,11 +34,12 @@ const COLORS: Record<AppNotification['type'], string> = {
 }
 
 function describeNotification(n: AppNotification) {
+  const contentWord = n.post?.is_reel ? 'reel' : 'post'
   switch (n.type) {
     case 'like':
-      return 'liked your post.'
+      return `liked your ${contentWord}.`
     case 'comment':
-      return 'commented on your post.'
+      return `commented on your ${contentWord}.`
     case 'comment_reply':
       return 'replied to your comment.'
     case 'follow':
@@ -46,12 +47,42 @@ function describeNotification(n: AppNotification) {
     case 'follow_accepted':
       return 'accepted your follow request.'
     case 'mention':
-      return 'mentioned you.'
+      return n.post ? `tagged you in a ${contentWord}.` : 'mentioned you.'
     case 'message':
       return 'sent you a message.'
     default:
       return ''
   }
+}
+
+/** Where clicking a notification should actually take you. */
+function notificationHref(n: AppNotification): string | null {
+  if (n.post) return n.post.is_reel ? `/reel/${n.post.id}` : `/p/${n.post.id}`
+  if (n.type === 'follow' || n.type === 'follow_accepted') return n.actor ? `/${n.actor.username}` : null
+  if (n.type === 'message') return '/messages'
+  return null
+}
+
+function NotificationThumbnail({ post }: { post: NonNullable<AppNotification['post']> }) {
+  const [failed, setFailed] = useState(false)
+  const media = post.media?.[0]
+
+  if (!media || failed) {
+    return (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-paper-100 text-ink-400 dark:bg-ink-800">
+        <ImageOff size={16} />
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={(post.is_reel && post.cover_url) || media.media_url}
+      alt=""
+      className="h-11 w-11 shrink-0 rounded-md object-cover"
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 export function NotificationPanel() {
@@ -125,25 +156,37 @@ export function NotificationPanel() {
         </div>
       )}
 
-      {notifications.map((n) => (
-        <div key={n.id} className="flex items-center gap-3 px-4 py-3">
-          <div className="relative">
-            <Avatar src={n.actor?.avatar_url} name={n.actor?.full_name || n.actor?.username || 'SMG'} size="md" />
-            <span className={`absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-white dark:ring-ink-950 ${COLORS[n.type]}`}>
-              {ICONS[n.type]}
-            </span>
+      {notifications.map((n) => {
+        const href = notificationHref(n)
+        const row = (
+          <div className="flex items-center gap-3 px-4 py-3 hover:bg-paper-50 dark:hover:bg-ink-800">
+            <div className="relative">
+              <Avatar src={n.actor?.avatar_url} name={n.actor?.full_name || n.actor?.username || 'SMG'} size="md" />
+              <span className={`absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-white dark:ring-ink-950 ${COLORS[n.type]}`}>
+                {ICONS[n.type]}
+              </span>
+            </div>
+            <p className="flex-1 text-sm">
+              <Link
+                to={`/${n.actor?.username}`}
+                onClick={(e) => e.stopPropagation()}
+                className="mr-1 font-semibold hover:underline"
+              >
+                {n.actor?.username}
+              </Link>
+              {describeNotification(n)} <span className="text-ink-500">{timeAgo(n.created_at)}</span>
+            </p>
+            {n.post && <NotificationThumbnail post={n.post} />}
           </div>
-          <p className="flex-1 text-sm">
-            <Link to={`/${n.actor?.username}`} className="mr-1 font-semibold hover:underline">
-              {n.actor?.username}
-            </Link>
-            {describeNotification(n)} <span className="text-ink-500">{timeAgo(n.created_at)}</span>
-          </p>
-          {n.post?.media?.[0] && (
-            <img src={n.post.media[0].media_url} alt="" className="h-11 w-11 rounded-md object-cover" />
-          )}
-        </div>
-      ))}
+        )
+        return href ? (
+          <Link key={n.id} to={href} className="block">
+            {row}
+          </Link>
+        ) : (
+          <div key={n.id}>{row}</div>
+        )
+      })}
     </div>
   )
 }

@@ -62,6 +62,11 @@ export function LoginPage() {
           Sign up
         </Link>
       </p>
+      <p className="mt-2 text-center text-sm">
+        <Link to="/forgot-password" className="font-semibold text-signal-500">
+          Forgot password?
+        </Link>
+      </p>
     </div>
   )
 }
