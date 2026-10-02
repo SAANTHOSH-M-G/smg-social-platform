@@ -197,7 +197,7 @@ export function MusicPicker({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label="Choose music">
+    <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label="Choose music">
       <div className="flex h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl bg-white shadow-soft dark:bg-ink-900 sm:h-[600px] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-paper-200 px-4 py-3 dark:border-ink-700">
           <h2 className="flex items-center gap-2 text-base font-semibold">

@@ -17,7 +17,7 @@ export function Modal({
 }) {
   if (!open) return null
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-0 sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
       <div
         className={
           className ??
