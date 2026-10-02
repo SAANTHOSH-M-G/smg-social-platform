@@ -51,14 +51,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getProfileById(session.user.id).then((p) => {
       if (!cancelled) setProfile(p)
     })
-    setPresence(session.user.id, true).catch(() => undefined)
+    const userId = session.user.id
+    setPresence(userId, true).catch(() => undefined)
 
-    const handleUnload = () => {
-      void setPresence(session.user.id, false)
+    // Heartbeat so "Active now" stays accurate even when the tab is closed
+    // abruptly (readers also treat a stale last_seen as offline).
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void setPresence(userId, true).catch(() => undefined)
+    }, 60_000)
+    const handleVisibility = () => {
+      void setPresence(userId, document.visibilityState === 'visible').catch(() => undefined)
     }
+    const handleUnload = () => {
+      void setPresence(userId, false)
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('beforeunload', handleUnload)
     return () => {
       cancelled = true
+      window.clearInterval(heartbeat)
+      document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('beforeunload', handleUnload)
     }
   }, [session?.user])

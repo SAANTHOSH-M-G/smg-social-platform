@@ -35,4 +35,5 @@ export const BUCKETS = {
   posts: 'posts',
   stories: 'stories',
   messages: 'messages',
+  audio: 'audio',
 } as const

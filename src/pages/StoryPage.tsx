@@ -14,7 +14,9 @@ export function StoryPage() {
 
   useEffect(() => {
     if (!storyId || !profile) return
-    getStoryGroupForStory(storyId, profile.id).then(setGroup)
+    getStoryGroupForStory(storyId, profile.id)
+      .then(setGroup)
+      .catch(() => setGroup(null))
   }, [storyId, profile])
 
   if (group === undefined) {
@@ -43,8 +45,8 @@ export function StoryPage() {
     <StoryViewer
       groups={[group]}
       initialIndex={0}
-      onClose={() => navigate(-1)}
-      onGroupsChange={() => undefined}
+      onClose={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
+      onGroupsChange={(next) => setGroup(next[0] ?? null)}
       startStoryIndex={startIndex}
     />
   )

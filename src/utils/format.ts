@@ -29,3 +29,28 @@ export function initialsOf(name: string): string {
     .map((p) => p[0]?.toUpperCase())
     .join('')
 }
+
+export function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+export function formatDayLabel(iso: string): string {
+  const d = new Date(iso)
+  const today = new Date()
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOf(today) - startOf(d)) / 86_400_000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' })
+}
+
+export function isSameDay(a: string, b: string): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString()
+}
+
+export function formatDuration(totalSeconds: number | null | undefined): string {
+  if (!totalSeconds || totalSeconds < 0) return '0:00'
+  const m = Math.floor(totalSeconds / 60)
+  const s = Math.floor(totalSeconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}

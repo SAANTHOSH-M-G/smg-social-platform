@@ -1,10 +1,10 @@
 import { supabase } from '@/lib/supabase'
-import type { Post, PostMedia, Profile } from '@/types'
-import { uploadToBucket, getImageDimensions, generateVideoThumbnail, validateAudioFile, deleteFromPublicUrl } from './storage'
+import type { AudioTrack, Post, PostMedia, Profile } from '@/types'
+import { uploadToBucket, getImageDimensions, generateVideoThumbnail, deleteFromPublicUrl } from './storage'
 import { BUCKETS } from '@/lib/supabase'
 
 const POST_SELECT = `
-  id, user_id, caption, location, is_reel, audio_title, audio_url, cover_url, like_count, comment_count, created_at, updated_at,
+  id, user_id, caption, location, is_reel, audio_title, audio_artist, audio_track_id, audio_url, cover_url, like_count, comment_count, created_at, updated_at,
   author:profiles!posts_user_id_fkey(*),
   media:post_media(*),
   tagged_users:post_tagged_users(profile:profiles!post_tagged_users_user_id_fkey(*))
@@ -138,13 +138,19 @@ export interface CreatePostInput {
   caption: string
   location: string
   isReel: boolean
-  audioTitle?: string
   files: File[]
   taggedUserIds?: string[]
   /** User-picked cover image for a reel; if omitted, one is generated from the video. */
   coverFile?: File
-  /** Optional user-owned/royalty-free audio track to attach to the post. */
-  audioFile?: File
+  /** Track chosen in the music picker (library or the user's own upload). Stored as a reference on the post. */
+  audioTrack?: AudioTrack | null
+}
+
+/** Columns describing a post's music. The URL is copied onto the post so playback never depends on the catalogue row surviving. */
+function audioColumns(track: AudioTrack | null | undefined) {
+  return track
+    ? { audio_url: track.audio_url, audio_title: track.title, audio_artist: track.artist, audio_track_id: track.id }
+    : { audio_url: null, audio_title: '', audio_artist: '', audio_track_id: null }
 }
 
 function extractHashtags(caption: string): string[] {
@@ -158,12 +164,12 @@ function extractMentionUsernames(caption: string): string[] {
 }
 
 export async function createPost(input: CreatePostInput): Promise<Post> {
-  const { userId, caption, location, isReel, audioTitle, files, taggedUserIds, coverFile, audioFile } = input
+  const { userId, caption, location, isReel, files, taggedUserIds, coverFile, audioTrack } = input
   if (files.length === 0) throw new Error('At least one photo or video is required.')
 
   const { data: post, error: postError } = await supabase
     .from('posts')
-    .insert({ user_id: userId, caption, location, is_reel: isReel, audio_title: audioTitle ?? '' })
+    .insert({ user_id: userId, caption, location, is_reel: isReel, ...audioColumns(audioTrack) })
     .select('*')
     .single()
   if (postError) throw postError
@@ -203,12 +209,6 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     }
   }
 
-  if (audioFile) {
-    validateAudioFile(audioFile)
-    const audioUrl = await uploadToBucket(BUCKETS.posts, userId, audioFile)
-    await supabase.from('posts').update({ audio_url: audioUrl }).eq('id', post.id)
-  }
-
   if (taggedUserIds?.length) {
     await supabase.from('post_tagged_users').insert(taggedUserIds.map((uid) => ({ post_id: post.id, user_id: uid })))
   }
@@ -244,10 +244,9 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
 export interface UpdatePostInput {
   caption?: string
   location?: string
-  audioTitle?: string
   taggedUserIds?: string[]
-  /** Pass a new file to replace the track, or `null` to remove it entirely. */
-  audioFile?: File | null
+  /** Pass a track to replace the music, or `null` to remove it. Omit to leave it unchanged. */
+  audioTrack?: AudioTrack | null
 }
 
 /**
@@ -261,14 +260,7 @@ export async function updatePost(postId: string, userId: string, input: UpdatePo
   const patch: Record<string, string | null> = {}
   if (input.caption !== undefined) patch.caption = input.caption
   if (input.location !== undefined) patch.location = input.location
-  if (input.audioTitle !== undefined) patch.audio_title = input.audioTitle
-
-  if (input.audioFile === null) {
-    patch.audio_url = null
-  } else if (input.audioFile) {
-    validateAudioFile(input.audioFile)
-    patch.audio_url = await uploadToBucket(BUCKETS.posts, userId, input.audioFile)
-  }
+  if (input.audioTrack !== undefined) Object.assign(patch, audioColumns(input.audioTrack))
 
   if (Object.keys(patch).length > 0) {
     const { error } = await supabase.from('posts').update(patch).eq('id', postId).eq('user_id', userId)
@@ -325,7 +317,7 @@ export async function toggleSave(postId: string, userId: string, currentlySaved:
 export async function deletePost(postId: string, userId: string) {
   const { data: post } = await supabase
     .from('posts')
-    .select('cover_url, audio_url, media:post_media(media_url)')
+    .select('cover_url, media:post_media(media_url)')
     .eq('id', postId)
     .eq('user_id', userId)
     .maybeSingle()
@@ -335,11 +327,10 @@ export async function deletePost(postId: string, userId: string) {
 
   // Best-effort cleanup — the DB rows are already gone (cascaded via FK),
   // this just stops the underlying files piling up in Storage forever.
-  const typed = post as unknown as { cover_url: string | null; audio_url: string | null; media: { media_url: string }[] } | null
+  const typed = post as unknown as { cover_url: string | null; media: { media_url: string }[] } | null
   if (typed) {
     await Promise.all([
       deleteFromPublicUrl(BUCKETS.posts, typed.cover_url),
-      deleteFromPublicUrl(BUCKETS.posts, typed.audio_url),
       ...typed.media.map((m) => deleteFromPublicUrl(BUCKETS.posts, m.media_url)),
     ])
   }

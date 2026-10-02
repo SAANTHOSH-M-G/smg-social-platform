@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, Trash2, Eye, Heart, Send, Link2 } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Trash2, Eye, Heart, Send, Link2, Pause, Play, Volume2, VolumeX, Plus, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
+import { Spinner } from './Common'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { StoryGroup } from '@/types'
@@ -10,7 +11,10 @@ import { markStoryViewed, deleteStory, getStoryViewers, toggleStoryLike, replyTo
 import { timeAgo } from '@/utils/format'
 import { ConfirmDialog } from './Common'
 
-const STORY_DURATION_MS = 5000
+const IMAGE_DURATION_MS = 5000
+/** Longer videos are cut off at this length so one story can't hold the whole sequence hostage. */
+const MAX_VIDEO_MS = 60_000
+const HOLD_TO_PAUSE_MS = 180
 
 export function StoryViewer({
   groups,
@@ -18,20 +22,28 @@ export function StoryViewer({
   onClose,
   onGroupsChange,
   startStoryIndex = 0,
+  onAddStory,
 }: {
   groups: StoryGroup[]
   initialIndex: number
   onClose: () => void
   onGroupsChange: (groups: StoryGroup[]) => void
-  /** Which story within the starting group to open on (used by shared /story/:id links). */
+  /** Which story within the starting group to open on (first unseen, or a shared /story/:id link). */
   startStoryIndex?: number
+  /** Shown on your own stories so you can add another one without leaving the viewer. */
+  onAddStory?: () => void
 }) {
   const { profile } = useAuth()
   const { showToast } = useToast()
-  const [groupIndex, setGroupIndex] = useState(initialIndex)
-  const [storyIndex, setStoryIndex] = useState(startStoryIndex)
-  const [paused, setPaused] = useState(false)
+  const [pos, setPos] = useState({ g: initialIndex, s: startStoryIndex })
   const [progress, setProgress] = useState(0)
+  const [holding, setHolding] = useState(false)
+  const [manualPause, setManualPause] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
+  const [hidden, setHidden] = useState(document.visibilityState === 'hidden')
+  const [mediaLoading, setMediaLoading] = useState(true)
+  const [mediaError, setMediaError] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [viewers, setViewers] = useState<{ id: string; avatar_url: string; username: string }[]>([])
   const [showViewers, setShowViewers] = useState(false)
@@ -39,102 +51,219 @@ export function StoryViewer({
   const [likeCount, setLikeCount] = useState(0)
   const [replyText, setReplyText] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
-  const rafRef = useRef<number>()
-  const startRef = useRef<number>(0)
-  const elapsedRef = useRef<number>(0)
 
-  const group = groups[groupIndex]
-  const story = group?.stories[storyIndex]
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const elapsedRef = useRef(0)
+  const lastTickRef = useRef(0)
+  const lastProgressRef = useRef(0)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const holdActiveRef = useRef(false)
+
+  const group = groups[pos.g]
+  const story = group?.stories[pos.s]
   const isOwn = profile?.id === group?.author.id
+  const isVideo = story?.media_type === 'video'
+  const paused = holding || manualPause || inputFocused || hidden || showViewers || confirmDelete
 
-  const goNext = useMemo(
-    () => () => {
-      if (!group) return
-      if (storyIndex < group.stories.length - 1) {
-        setStoryIndex((i) => i + 1)
-      } else if (groupIndex < groups.length - 1) {
-        setGroupIndex((i) => i + 1)
-        setStoryIndex(0)
-      } else {
-        onClose()
-      }
-    },
-    [group, storyIndex, groupIndex, groups.length, onClose]
-  )
+  // always-current copies for event handlers / the rAF loop
+  const posRef = useRef(pos)
+  const groupsRef = useRef(groups)
+  posRef.current = pos
+  groupsRef.current = groups
 
-  const goPrev = () => {
-    if (storyIndex > 0) {
-      setStoryIndex((i) => i - 1)
-    } else if (groupIndex > 0) {
-      setGroupIndex((i) => i - 1)
-      setStoryIndex(groups[groupIndex - 1].stories.length - 1)
-    }
-  }
+  const goNext = useCallback(() => {
+    const { g, s } = posRef.current
+    const list = groupsRef.current
+    const current = list[g]
+    if (!current) return onClose()
+    if (s < current.stories.length - 1) setPos({ g, s: s + 1 })
+    else if (g < list.length - 1) setPos({ g: g + 1, s: 0 })
+    else onClose()
+  }, [onClose])
 
+  const goPrev = useCallback(() => {
+    const { g, s } = posRef.current
+    const list = groupsRef.current
+    if (s > 0) setPos({ g, s: s - 1 })
+    else if (g > 0) setPos({ g: g - 1, s: Math.max(0, list[g - 1].stories.length - 1) })
+    else setPos({ g, s: 0 }) // first story: restart it
+  }, [])
+
+  // reset per-story state
   useEffect(() => {
-    setProgress(0)
     elapsedRef.current = 0
-  }, [groupIndex, storyIndex])
-
-  useEffect(() => {
-    if (!story || !profile) return
-    void markStoryViewed(story.id, profile.id)
-  }, [story, profile])
-
-  useEffect(() => {
+    lastProgressRef.current = 0
+    lastTickRef.current = 0
+    setProgress(0)
+    setMediaLoading(true)
+    setMediaError(false)
+    setManualPause(false)
     setLiked(story?.liked_by_me ?? false)
     setLikeCount(story?.like_count ?? 0)
     setReplyText('')
   }, [story?.id])
 
   useEffect(() => {
-    if (paused || !story) return
-    startRef.current = performance.now() - elapsedRef.current
+    if (!story || !profile || isOwn) return
+    void markStoryViewed(story.id, profile.id)
+  }, [story?.id, profile, isOwn])
+
+  // warm the cache for the next image so transitions are instant
+  useEffect(() => {
+    const next = group?.stories[pos.s + 1] ?? groups[pos.g + 1]?.stories[0]
+    if (next && next.media_type === 'image') {
+      const img = new Image()
+      img.src = next.media_url
+    }
+  }, [pos, group, groups])
+
+  useEffect(() => {
+    const onVis = () => setHidden(document.visibilityState === 'hidden')
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
+
+  // lock page scroll behind the viewer
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+
+  // video play/pause follows `paused`
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !isVideo) return
+    if (paused) {
+      v.pause()
+    } else {
+      v.muted = muted
+      v.play().catch(() => {
+        // Autoplay with sound was refused (e.g. opened via a direct /story link). Fall back to muted
+        // playback; the speaker button lets the viewer turn sound on with a real click.
+        if (!v.muted) {
+          v.muted = true
+          setMuted(true)
+          v.play().catch(() => undefined)
+        }
+      })
+    }
+  }, [paused, isVideo, story?.id, mediaLoading])
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted
+  }, [muted])
+
+  // single progress loop: images count wall-clock time while not paused/loading,
+  // videos mirror the element's real playback position
+  useEffect(() => {
+    if (!story || mediaError) return
+    let raf = 0
     const tick = (now: number) => {
-      const elapsed = now - startRef.current
-      elapsedRef.current = elapsed
-      const pct = Math.min(100, (elapsed / STORY_DURATION_MS) * 100)
-      setProgress(pct)
-      if (pct >= 100) {
+      const v = videoRef.current
+      let pct = lastProgressRef.current
+      if (isVideo) {
+        if (v && v.duration && isFinite(v.duration)) {
+          const cap = Math.min(v.duration * 1000, MAX_VIDEO_MS)
+          pct = Math.min(1, (v.currentTime * 1000) / cap)
+        }
+      } else {
+        if (!paused && !mediaLoading) {
+          if (lastTickRef.current) elapsedRef.current += now - lastTickRef.current
+          pct = Math.min(1, elapsedRef.current / IMAGE_DURATION_MS)
+        }
+        lastTickRef.current = now
+      }
+      if (Math.abs(pct - lastProgressRef.current) >= 0.004 || pct === 1) {
+        lastProgressRef.current = pct
+        setProgress(pct)
+      }
+      if (pct >= 1 && !paused) {
         goNext()
         return
       }
-      rafRef.current = requestAnimationFrame(tick)
+      raf = requestAnimationFrame(tick)
     }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    }
-  }, [paused, story, goNext])
+    lastTickRef.current = 0
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [story?.id, isVideo, paused, mediaLoading, mediaError, goNext])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return
       if (e.key === 'ArrowRight') goNext()
-      if (e.key === 'ArrowLeft') goPrev()
-      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft') goPrev()
+      else if (e.key === 'Escape') onClose()
+      else if (e.key === ' ') {
+        e.preventDefault()
+        setManualPause((p) => !p)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [goNext, goPrev, onClose])
+
+  useEffect(() => () => clearTimeout(holdTimerRef.current), [])
 
   if (!group || !story) return null
 
+  // ---- tap / hold gestures on the media area (touch, mouse and pen) ----
+  const onPointerDown = () => {
+    holdActiveRef.current = false
+    clearTimeout(holdTimerRef.current)
+    holdTimerRef.current = setTimeout(() => {
+      holdActiveRef.current = true
+      setHolding(true)
+    }, HOLD_TO_PAUSE_MS)
+  }
+  const endHold = () => {
+    clearTimeout(holdTimerRef.current)
+    setHolding(false)
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const wasHold = holdActiveRef.current
+    holdActiveRef.current = false
+    endHold()
+    if (wasHold) return // released a long-press: just resume
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    if (x < rect.width * 0.33) goPrev()
+    else goNext()
+  }
+
   const handleDelete = async () => {
     if (!profile) return
-    await deleteStory(story.id, profile.id)
-    const updatedStories = group.stories.filter((s) => s.id !== story.id)
-    const nextGroups = updatedStories.length
-      ? groups.map((g, i) => (i === groupIndex ? { ...g, stories: updatedStories } : g))
-      : groups.filter((_, i) => i !== groupIndex)
-    onGroupsChange(nextGroups)
+    const { g, s } = pos
+    try {
+      await deleteStory(story.id, profile.id)
+    } catch {
+      showToast('Could not delete story', 'error')
+      setConfirmDelete(false)
+      return
+    }
+    const remaining = group.stories.filter((x) => x.id !== story.id)
+    const nextGroups = remaining.length ? groups.map((gr, i) => (i === g ? { ...gr, stories: remaining } : gr)) : groups.filter((_, i) => i !== g)
     setConfirmDelete(false)
-    if (!updatedStories.length) onClose()
+    onGroupsChange(nextGroups)
+    if (!remaining.length) {
+      if (nextGroups[g]) setPos({ g, s: 0 })
+      else onClose()
+    } else {
+      setPos({ g, s: Math.min(s, remaining.length - 1) })
+    }
   }
 
   const openViewers = async () => {
-    const list = await getStoryViewers(story.id)
-    setViewers(list)
     setShowViewers(true)
+    try {
+      setViewers(await getStoryViewers(story.id))
+    } catch {
+      setViewers([])
+    }
   }
 
   const handleLike = async () => {
@@ -152,7 +281,7 @@ export function StoryViewer({
   }
 
   const handleReply = async () => {
-    if (!profile || !replyText.trim()) return
+    if (!profile || !replyText.trim() || sendingReply) return
     setSendingReply(true)
     try {
       await replyToStory(story.id, profile.id, group.author.id, replyText)
@@ -175,61 +304,127 @@ export function StoryViewer({
     }
   }
 
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black">
-      <button onClick={onClose} className="absolute right-4 top-4 z-20 text-white/90 hover:text-white">
-        <X size={28} />
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black" role="dialog" aria-modal="true" aria-label={`${group.author.username}'s story`}>
+      <button onClick={onClose} aria-label="Close story" className="absolute right-3 top-3 z-30 hidden rounded-full p-2 text-white/90 hover:bg-white/10 sm:block">
+        <X size={26} />
       </button>
 
-      <button onClick={goPrev} className="absolute left-0 top-0 z-10 hidden h-full w-16 items-center justify-start pl-2 text-white/70 hover:text-white sm:flex">
-        <ChevronLeft size={32} />
+      <button onClick={goPrev} aria-label="Previous story" className="absolute left-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 sm:block">
+        <ChevronLeft size={26} />
       </button>
-      <button onClick={goNext} className="absolute right-0 top-0 z-10 hidden h-full w-16 items-center justify-end pr-2 text-white/70 hover:text-white sm:flex">
-        <ChevronRight size={32} />
+      <button onClick={goNext} aria-label="Next story" className="absolute right-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 sm:block">
+        <ChevronRight size={26} />
       </button>
 
-      <div className="relative flex h-full w-full max-w-md flex-col sm:h-[92vh] sm:rounded-xl">
-        <div className="absolute inset-x-2 top-2 z-20 flex gap-1">
-          {group.stories.map((s, i) => (
-            <div key={s.id} className="h-0.5 flex-1 overflow-hidden rounded-full bg-white/30">
-              <div
-                className="h-full bg-white"
-                style={{ width: i < storyIndex ? '100%' : i === storyIndex ? `${progress}%` : '0%' }}
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="absolute inset-x-2 top-6 z-20 flex items-center gap-2 text-white">
-          <Avatar src={group.author.avatar_url} name={group.author.full_name || group.author.username} size="sm" />
-          <span className="text-sm font-semibold">{group.author.username}</span>
-          <span className="text-xs text-white/70">{timeAgo(story.created_at)}</span>
-          {isOwn && (
-            <button onClick={() => setConfirmDelete(true)} className="ml-auto rounded-full p-1.5 hover:bg-white/10">
-              <Trash2 size={18} />
-            </button>
-          )}
-        </div>
-
+      <div className="relative flex h-[100dvh] w-full max-w-[460px] flex-col overflow-hidden bg-ink-950 sm:h-[94vh] sm:rounded-xl">
+        {/* media + gesture surface */}
         <div
-          className="relative flex flex-1 items-center justify-center overflow-hidden bg-ink-950 select-none"
-          onMouseDown={() => setPaused(true)}
-          onMouseUp={() => setPaused(false)}
-          onTouchStart={() => setPaused(true)}
-          onTouchEnd={() => setPaused(false)}
+          className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center bg-ink-950"
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+          onPointerCancel={endHold}
+          onPointerLeave={() => holdActiveRef.current && endHold()}
+          onContextMenu={(e) => e.preventDefault()}
         >
-          {story.media_type === 'video' ? (
-            <video src={story.media_url} className="max-h-full max-w-full" autoPlay muted playsInline />
+          {isVideo ? (
+            <video
+              ref={videoRef}
+              key={story.id}
+              src={story.media_url}
+              className="h-full w-full object-contain"
+              playsInline
+              preload="auto"
+              muted={muted}
+              onCanPlay={() => setMediaLoading(false)}
+              onPlaying={() => setMediaLoading(false)}
+              onWaiting={() => setMediaLoading(true)}
+              onEnded={goNext}
+              onError={() => {
+                setMediaLoading(false)
+                setMediaError(true)
+              }}
+            />
           ) : (
-            <img src={story.media_url} alt="" className="max-h-full max-w-full object-contain" />
+            <img
+              key={story.id}
+              src={story.media_url}
+              alt={story.caption || `Story by ${group.author.username}`}
+              draggable={false}
+              className="h-full w-full object-contain"
+              onLoad={() => setMediaLoading(false)}
+              onError={() => {
+                setMediaLoading(false)
+                setMediaError(true)
+              }}
+            />
           )}
-          <button onClick={goPrev} className="absolute inset-y-0 left-0 w-1/3 sm:hidden" aria-label="Previous" />
-          <button onClick={goNext} className="absolute inset-y-0 right-0 w-1/3 sm:hidden" aria-label="Next" />
+
+          {mediaLoading && !mediaError && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-white">
+              <Spinner size={30} />
+            </div>
+          )}
+          {mediaError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white" onPointerDown={stop} onPointerUp={stop}>
+              <AlertCircle size={32} />
+              <p className="text-sm">This story couldn't be loaded.</p>
+              <button onClick={goNext} className="rounded-lg bg-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/25">
+                Skip
+              </button>
+            </div>
+          )}
+          {paused && !mediaLoading && !mediaError && !holding && (manualPause || inputFocused) && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span className="rounded-full bg-black/50 p-4 text-white">
+                <Pause size={28} />
+              </span>
+            </div>
+          )}
         </div>
 
-        {story.caption && (
-          <div className="bg-ink-950 px-4 py-2 text-sm text-white/90">{story.caption}</div>
-        )}
+        {/* top overlay: progress segments + author */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/60 to-transparent px-2 pb-8 pt-2">
+          <div className="flex gap-1" role="progressbar" aria-valuemin={0} aria-valuemax={group.stories.length} aria-valuenow={pos.s + 1} aria-label="Story progress">
+            {group.stories.map((s, i) => (
+              <div key={s.id} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30">
+                <div className="h-full origin-left bg-white" style={{ transform: `scaleX(${i < pos.s ? 1 : i === pos.s ? progress : 0})` }} />
+              </div>
+            ))}
+          </div>
+          <div className="pointer-events-auto mt-2.5 flex items-center gap-2 text-white" onPointerDown={stop} onPointerUp={stop}>
+            <Avatar src={group.author.avatar_url} name={group.author.full_name || group.author.username} size="sm" />
+            <span className="text-sm font-semibold drop-shadow">{group.author.username}</span>
+            <span className="text-xs text-white/70">{timeAgo(story.created_at)}</span>
+            <div className="ml-auto flex items-center gap-0.5">
+              {isOwn && onAddStory && (
+                <button onClick={onAddStory} aria-label="Add to your story" title="Add to your story" className="rounded-full p-1.5 hover:bg-white/10">
+                  <Plus size={20} />
+                </button>
+              )}
+              <button onClick={() => setManualPause((p) => !p)} aria-label={manualPause ? 'Resume' : 'Pause'} title={manualPause ? 'Resume' : 'Pause'} className="rounded-full p-1.5 hover:bg-white/10">
+                {manualPause ? <Play size={18} /> : <Pause size={18} />}
+              </button>
+              {isVideo && (
+                <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} title={muted ? 'Unmute' : 'Mute'} className="rounded-full p-1.5 hover:bg-white/10">
+                  {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+              )}
+              {isOwn && (
+                <button onClick={() => setConfirmDelete(true)} aria-label="Delete story" title="Delete story" className="rounded-full p-1.5 hover:bg-white/10">
+                  <Trash2 size={18} />
+                </button>
+              )}
+              <button onClick={onClose} aria-label="Close story" className="rounded-full p-1.5 hover:bg-white/10 sm:hidden">
+                <X size={22} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {story.caption && <div className="bg-ink-950 px-4 py-2 text-center text-sm text-white/90 [overflow-wrap:anywhere]">{story.caption}</div>}
 
         {isOwn ? (
           <button onClick={openViewers} className="flex items-center gap-2 bg-ink-950 px-4 py-3 text-sm text-white/80 hover:text-white">
@@ -241,22 +436,25 @@ export function StoryViewer({
             )}
           </button>
         ) : (
-          <div className="flex items-center gap-2 bg-ink-950 px-3 py-3">
+          <div className="flex items-center gap-2 bg-ink-950 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <input
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
               onKeyDown={(e) => e.key === 'Enter' && handleReply()}
-              placeholder={`Reply to ${group.author.username}...`}
-              className="flex-1 rounded-full border border-white/20 bg-transparent px-4 py-2 text-sm text-white outline-none placeholder:text-white/50"
+              placeholder={`Reply to ${group.author.username}…`}
+              aria-label="Reply to story"
+              className="min-w-0 flex-1 rounded-full border border-white/20 bg-transparent px-4 py-2 text-sm text-white outline-none placeholder:text-white/50"
             />
-            <button onClick={handleLike} disabled={!profile} className="shrink-0 text-white hover:text-ember-400">
+            <button onClick={handleLike} disabled={!profile} aria-label={liked ? 'Unlike story' : 'Like story'} className="shrink-0 text-white hover:text-ember-400">
               <Heart size={24} className={clsx(liked && 'fill-ember-500 text-ember-500')} />
             </button>
-            <button onClick={handleShare} className="shrink-0 text-white hover:text-white/70">
+            <button onClick={handleShare} aria-label="Copy story link" className="shrink-0 text-white hover:text-white/70">
               <Link2 size={22} />
             </button>
             {replyText.trim() && (
-              <button onClick={handleReply} disabled={sendingReply} className="shrink-0 text-signal-400 disabled:opacity-50">
+              <button onClick={handleReply} disabled={sendingReply} aria-label="Send reply" className="shrink-0 text-signal-400 disabled:opacity-50">
                 <Send size={22} />
               </button>
             )}
@@ -266,10 +464,7 @@ export function StoryViewer({
 
       {showViewers && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setShowViewers(false)}>
-          <div
-            className="max-h-[70vh] w-full max-w-sm overflow-y-auto rounded-t-2xl bg-white p-4 dark:bg-ink-900 sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="max-h-[70vh] w-full max-w-sm overflow-y-auto rounded-t-2xl bg-white p-4 dark:bg-ink-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 font-semibold">Viewed by {viewers.length}</h3>
             <div className="space-y-3">
               {viewers.map((v) => (

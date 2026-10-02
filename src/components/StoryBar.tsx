@@ -1,77 +1,94 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { useAuth } from '@/contexts/AuthContext'
-import { useToast } from '@/contexts/ToastContext'
-import { getStoryFeed, createStory } from '@/services/stories'
+import { getStoryFeed } from '@/services/stories'
 import type { StoryGroup } from '@/types'
 import { StoryViewer } from './StoryViewer'
-import { validateMediaFile, UploadValidationError } from '@/services/storage'
+import { StoryComposer } from './StoryComposer'
+
+/** Drops stories whose expiry has passed (and groups left empty) without a refetch. */
+function pruneExpired(groups: StoryGroup[]): StoryGroup[] {
+  const now = Date.now()
+  let changed = false
+  const next = groups
+    .map((g) => {
+      const stories = g.stories.filter((s) => new Date(s.expires_at).getTime() > now)
+      if (stories.length !== g.stories.length) changed = true
+      return stories.length === g.stories.length ? g : { ...g, stories }
+    })
+    .filter((g) => g.stories.length > 0)
+  return changed ? next : groups
+}
 
 export function StoryBar() {
   const { profile } = useAuth()
-  const { showToast } = useToast()
   const [groups, setGroups] = useState<StoryGroup[]>([])
   const [loading, setLoading] = useState(true)
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [viewer, setViewer] = useState<{ groupIndex: number; storyIndex: number } | null>(null)
+  const [composerOpen, setComposerOpen] = useState(false)
+
+  const refresh = useCallback(async () => {
+    if (!profile) return
+    try {
+      setGroups(await getStoryFeed(profile.id))
+    } catch {
+      /* keep whatever we had; the bar is non-critical */
+    } finally {
+      setLoading(false)
+    }
+  }, [profile])
 
   useEffect(() => {
-    if (!profile) return
-    getStoryFeed(profile.id)
-      .then(setGroups)
-      .finally(() => setLoading(false))
-  }, [profile])
+    void refresh()
+  }, [refresh])
+
+  // stories expire on the clock: hide them as they do, and re-sync every few minutes
+  useEffect(() => {
+    const prune = window.setInterval(() => setGroups((g) => pruneExpired(g)), 30_000)
+    const sync = window.setInterval(() => void refresh(), 5 * 60_000)
+    return () => {
+      window.clearInterval(prune)
+      window.clearInterval(sync)
+    }
+  }, [refresh])
 
   if (!profile) return null
 
   const myGroup = groups.find((g) => g.author.id === profile.id)
 
-  const handleUpload = async (file: File) => {
-    try {
-      validateMediaFile(file)
-      setUploading(true)
-      await createStory(profile.id, file)
-      const fresh = await getStoryFeed(profile.id)
-      setGroups(fresh)
-      showToast('Your story was posted', 'success')
-    } catch (e) {
-      showToast(e instanceof UploadValidationError ? e.message : 'Could not upload story', 'error')
-    } finally {
-      setUploading(false)
-    }
+  const openGroup = (authorId: string) => {
+    const groupIndex = groups.findIndex((g) => g.author.id === authorId)
+    if (groupIndex === -1) return
+    // resume at the first story you haven't seen, like a real story tray
+    const firstUnseen = groups[groupIndex].stories.findIndex((s) => !s.seen_by_me)
+    setViewer({ groupIndex, storyIndex: firstUnseen === -1 ? 0 : firstUnseen })
   }
 
   return (
     <div className="border-b border-paper-200 bg-white px-3 py-4 dark:border-ink-700 dark:bg-ink-900 sm:rounded-2xl sm:border sm:px-4">
       <div className="no-scrollbar flex gap-4 overflow-x-auto">
         <div className="flex w-16 shrink-0 flex-col items-center gap-1.5">
-          <button
-            onClick={() => (myGroup ? setViewerIndex(groups.findIndex((g) => g.author.id === profile.id)) : fileInputRef.current?.click())}
-            disabled={uploading}
-            className="relative"
-          >
-            <Avatar src={profile.avatar_url} name={profile.full_name || profile.username} size="lg" ring={Boolean(myGroup)} />
-            {!myGroup && (
-              <span className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-signal-500 text-white ring-2 ring-white dark:ring-ink-900">
-                <Plus size={13} strokeWidth={3} />
-              </span>
-            )}
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => (myGroup ? openGroup(profile.id) : setComposerOpen(true))}
+              aria-label={myGroup ? 'View your story' : 'Add to your story'}
+              className="block"
+            >
+              <Avatar src={profile.avatar_url} name={profile.full_name || profile.username} size="lg" ring={Boolean(myGroup)} />
+            </button>
+            {/* always available, even while you already have active stories */}
+            <button
+              onClick={() => setComposerOpen(true)}
+              aria-label="Add another story"
+              title="Add to your story"
+              className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-signal-500 text-white ring-2 ring-white hover:bg-signal-600 dark:ring-ink-900"
+            >
+              <Plus size={13} strokeWidth={3} />
+            </button>
+          </div>
           <span className="w-full truncate text-center text-xs text-ink-700 dark:text-paper-200/80">Your story</span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,video/*"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void handleUpload(file)
-              e.target.value = ''
-            }}
-          />
         </div>
 
         {loading &&
@@ -85,11 +102,7 @@ export function StoryBar() {
         {groups
           .filter((g) => g.author.id !== profile.id)
           .map((group) => (
-            <button
-              key={group.author.id}
-              onClick={() => setViewerIndex(groups.findIndex((g) => g.author.id === group.author.id))}
-              className="flex w-16 shrink-0 flex-col items-center gap-1.5"
-            >
+            <button key={group.author.id} onClick={() => openGroup(group.author.id)} className="flex w-16 shrink-0 flex-col items-center gap-1.5" aria-label={`${group.author.username}'s story`}>
               <Avatar
                 src={group.author.avatar_url}
                 name={group.author.full_name || group.author.username}
@@ -102,14 +115,24 @@ export function StoryBar() {
           ))}
       </div>
 
-      {viewerIndex !== null && (
+      {viewer && (
         <StoryViewer
           groups={groups}
-          initialIndex={viewerIndex}
-          onClose={() => setViewerIndex(null)}
+          initialIndex={viewer.groupIndex}
+          startStoryIndex={viewer.storyIndex}
+          onClose={() => {
+            setViewer(null)
+            void refresh() // updates seen rings
+          }}
           onGroupsChange={setGroups}
+          onAddStory={() => {
+            setViewer(null)
+            setComposerOpen(true)
+          }}
         />
       )}
+
+      <StoryComposer open={composerOpen} onClose={() => setComposerOpen(false)} onPosted={() => void refresh()} />
     </div>
   )
 }

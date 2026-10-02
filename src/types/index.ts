@@ -31,6 +31,8 @@ export interface Post {
   location: string
   is_reel: boolean
   audio_title: string
+  audio_artist?: string
+  audio_track_id?: string | null
   audio_url: string | null
   cover_url: string | null
   like_count: number
@@ -65,6 +67,7 @@ export interface StoryItem {
   caption: string
   like_count: number
   liked_by_me?: boolean
+  seen_by_me?: boolean
   created_at: string
   expires_at: string
 }
@@ -113,9 +116,25 @@ export interface Conversation {
   is_group: boolean
   title: string | null
   last_message_at: string
+  /** Other participants (the signed-in user is excluded). */
   members: Profile[]
   last_message?: Message | null
   unread_count?: number
+  /** Read marker of the other participant in a 1:1 chat, used for "Seen". */
+  other_last_read_at?: string | null
+}
+
+export interface AudioTrack {
+  id: string
+  owner_id: string | null
+  title: string
+  artist: string
+  audio_url: string
+  duration_seconds: number | null
+  license: string
+  source: 'upload' | 'library'
+  is_public: boolean
+  created_at: string
 }
 
 export interface Message {

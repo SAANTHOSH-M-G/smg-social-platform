@@ -84,7 +84,9 @@ export function Sidebar({ unreadNotifications, unreadMessages }: { unreadNotific
           <span className="relative">
             <MessageCircle size={24} />
             {unreadMessages > 0 && (
-              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-ember-500 ring-2 ring-white dark:ring-ink-950" />
+              <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-ember-500 px-1 text-[10px] font-bold text-white">
+                {unreadMessages > 9 ? '9+' : unreadMessages}
+              </span>
             )}
           </span>
           <span className="hidden lg:inline">Messages</span>

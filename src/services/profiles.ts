@@ -37,11 +37,14 @@ export async function updateProfile(userId: string, input: UpdateProfileInput) {
 }
 
 export async function searchProfiles(query: string, limit = 20): Promise<Profile[]> {
-  if (!query.trim()) return []
+  // Strip characters that have meaning in PostgREST filter syntax / LIKE patterns so user input
+  // can't inject extra `.or()` conditions or wildcards.
+  const term = query.replace(/[,()%*\\]/g, ' ').trim()
+  if (!term) return []
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
+    .or(`username.ilike.%${term}%,full_name.ilike.%${term}%`)
     .limit(limit)
   if (error) throw error
   return (data ?? []) as Profile[]

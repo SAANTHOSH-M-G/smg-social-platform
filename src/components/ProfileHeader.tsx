@@ -6,6 +6,7 @@ import { FollowButton } from './FollowButton'
 import { Modal } from './Common'
 import { UserCard } from './UserCard'
 import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/contexts/ToastContext'
 import { getOrCreateDirectConversation } from '@/services/messages'
 import { getFollowers, getFollowing } from '@/services/follows'
 import type { Profile } from '@/types'
@@ -21,6 +22,8 @@ export function ProfileHeader({
   canViewContent: boolean
 }) {
   const { profile: me } = useAuth()
+  const { showToast } = useToast()
+  const [openingChat, setOpeningChat] = useState(false)
   const navigate = useNavigate()
   const isOwn = me?.id === profile.id
   const [listModal, setListModal] = useState<'followers' | 'following' | null>(null)
@@ -39,9 +42,16 @@ export function ProfileHeader({
   }
 
   const handleMessage = async () => {
-    if (!me) return
-    const conversationId = await getOrCreateDirectConversation(me.id, profile.id)
-    navigate(`/messages/${conversationId}`)
+    if (!me || openingChat) return
+    setOpeningChat(true)
+    try {
+      const conversationId = await getOrCreateDirectConversation(me.id, profile.id)
+      navigate(`/messages/${conversationId}`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not open conversation', 'error')
+    } finally {
+      setOpeningChat(false)
+    }
   }
 
   return (
@@ -68,7 +78,8 @@ export function ProfileHeader({
                 <FollowButton target={profile} />
                 <button
                   onClick={handleMessage}
-                  className="rounded-lg bg-paper-100 px-4 py-1.5 text-sm font-semibold hover:bg-paper-200 dark:bg-ink-700 dark:hover:bg-ink-600"
+                  disabled={openingChat}
+                  className="rounded-lg bg-paper-100 px-4 py-1.5 text-sm font-semibold hover:bg-paper-200 disabled:opacity-60 dark:bg-ink-700 dark:hover:bg-ink-600"
                 >
                   Message
                 </button>

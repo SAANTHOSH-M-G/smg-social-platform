@@ -17,7 +17,7 @@ export function Modal({
 }) {
   if (!open) return null
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
       <div
         className={
           className ??
@@ -59,7 +59,7 @@ export function ConfirmDialog({
 }) {
   if (!open) return null
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={onCancel} role="alertdialog" aria-modal="true" aria-label={title}>
       <div
         className="w-full max-w-sm overflow-hidden rounded-2xl bg-white text-center shadow-soft dark:bg-ink-800"
         onClick={(e) => e.stopPropagation()}

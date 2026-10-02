@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getPostById } from '@/services/posts'
 import { ReelViewer } from '@/components/ReelViewer'
@@ -9,11 +9,14 @@ import type { Post } from '@/types'
 export function ReelPage() {
   const { postId } = useParams()
   const { profile } = useAuth()
+  const navigate = useNavigate()
   const [post, setPost] = useState<Post | null | undefined>(undefined)
 
   useEffect(() => {
     if (!postId) return
-    getPostById(postId, profile?.id).then(setPost)
+    getPostById(postId, profile?.id)
+      .then(setPost)
+      .catch(() => setPost(null))
   }, [postId, profile?.id])
 
   if (post === undefined) {
@@ -33,9 +36,5 @@ export function ReelPage() {
     )
   }
 
-  return (
-    <div className="flex justify-center bg-black md:bg-transparent">
-      <ReelViewer reels={[post]} onChange={setPost} />
-    </div>
-  )
+  return <ReelViewer reels={[post]} onChange={setPost} onClose={() => (window.history.length > 1 ? navigate(-1) : navigate('/reels'))} />
 }

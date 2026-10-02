@@ -40,7 +40,7 @@ export function SearchModal({ open, onClose }: { open: boolean; onClose: () => v
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label="Search">
       <div
         className="flex h-full w-full max-w-sm flex-col bg-white dark:bg-ink-900 sm:h-full"
         onClick={(e) => e.stopPropagation()}

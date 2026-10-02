@@ -16,7 +16,8 @@ export async function getStoryFeed(viewerId: string): Promise<StoryGroup[]> {
     .order('created_at', { ascending: true })
   if (error) throw error
 
-  const raw = (stories ?? []) as unknown as (StoryItem & { author: Profile })[]
+  const nowMs = Date.now()
+  const raw = ((stories ?? []) as unknown as (StoryItem & { author: Profile })[]).filter((s) => new Date(s.expires_at).getTime() > nowMs)
   const storyIds = raw.map((s) => s.id)
   const [{ data: views }, { data: likes }] = await Promise.all([
     supabase.from('story_views').select('story_id').eq('user_id', viewerId),
@@ -28,6 +29,8 @@ export async function getStoryFeed(viewerId: string): Promise<StoryGroup[]> {
   const likedSet = new Set((likes ?? []).map((l) => l.story_id))
   raw.forEach((s) => {
     s.liked_by_me = likedSet.has(s.id)
+    // your own stories never show as "unseen" for yourself
+    s.seen_by_me = s.user_id === viewerId || seenSet.has(s.id)
   })
 
   const groupMap = new Map<string, StoryGroup>()
@@ -35,7 +38,7 @@ export async function getStoryFeed(viewerId: string): Promise<StoryGroup[]> {
     const existing = groupMap.get(s.user_id)
     const group = existing ?? { author: s.author, stories: [], hasUnseen: false }
     group.stories.push(s)
-    if (!seenSet.has(s.id)) group.hasUnseen = true
+    if (!s.seen_by_me) group.hasUnseen = true
     groupMap.set(s.user_id, group)
   })
 
@@ -50,6 +53,10 @@ export async function getStoryFeed(viewerId: string): Promise<StoryGroup[]> {
   return groups
 }
 
+/**
+ * Always INSERTs a new row - there is no per-user uniqueness on `stories`, so
+ * adding a story never replaces or hides the ones that are still active.
+ */
 export async function createStory(userId: string, file: File, caption = ''): Promise<StoryItem> {
   const url = await uploadToBucket(BUCKETS.stories, userId, file)
   const mediaType = file.type.startsWith('video/') ? ('video' as const) : ('image' as const)

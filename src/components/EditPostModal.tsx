@@ -1,32 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MapPin, Music2, Users, X } from 'lucide-react'
 import { Modal, Spinner } from './Common'
 import { Avatar } from './Avatar'
-import { AudioTrackPlayer } from './AudioTrackPlayer'
+import { MusicField } from './MusicField'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { useDebounce } from '@/hooks/useDebounce'
 import { updatePost } from '@/services/posts'
 import { searchProfiles } from '@/services/profiles'
 import { searchLocations } from '@/services/locations'
-import { UploadValidationError, validateAudioFile } from '@/services/storage'
-import type { Post, Profile } from '@/types'
+import type { AudioTrack, Post, Profile } from '@/types'
 
 export function EditPostModal({ post, open, onClose, onSaved }: { post: Post; open: boolean; onClose: () => void; onSaved: (post: Post) => void }) {
   const { profile } = useAuth()
   const { showToast } = useToast()
   const [caption, setCaption] = useState(post.caption)
   const [location, setLocation] = useState(post.location)
-  const [audioTitle, setAudioTitle] = useState(post.audio_title)
   const [taggedUsers, setTaggedUsers] = useState<Profile[]>(post.tagged_users ?? [])
   const [tagQuery, setTagQuery] = useState('')
   const [tagResults, setTagResults] = useState<Profile[]>([])
   const [locationResults, setLocationResults] = useState<string[]>([])
-  const [audioUrl, setAudioUrl] = useState<string | null>(post.audio_url)
-  const [newAudioFile, setNewAudioFile] = useState<File | null>(null)
-  const [audioRemoved, setAudioRemoved] = useState(false)
+  // undefined = leave the post's music untouched; null = remove it; track = replace it
+  const [audioChange, setAudioChange] = useState<AudioTrack | null | undefined>(undefined)
   const [saving, setSaving] = useState(false)
-  const audioInputRef = useRef<HTMLInputElement>(null)
   const debouncedTagQuery = useDebounce(tagQuery, 250)
   const debouncedLocation = useDebounce(location, 250)
 
@@ -34,11 +30,8 @@ export function EditPostModal({ post, open, onClose, onSaved }: { post: Post; op
     if (!open) return
     setCaption(post.caption)
     setLocation(post.location)
-    setAudioTitle(post.audio_title)
     setTaggedUsers(post.tagged_users ?? [])
-    setAudioUrl(post.audio_url)
-    setNewAudioFile(null)
-    setAudioRemoved(false)
+    setAudioChange(undefined)
   }, [open, post])
 
   useEffect(() => {
@@ -69,17 +62,6 @@ export function EditPostModal({ post, open, onClose, onSaved }: { post: Post; op
     }
   }, [debouncedTagQuery, profile?.id])
 
-  const handleAudioSelect = (file?: File) => {
-    if (!file) return
-    try {
-      validateAudioFile(file)
-      setNewAudioFile(file)
-      setAudioRemoved(false)
-    } catch (e) {
-      showToast(e instanceof UploadValidationError ? e.message : 'Invalid audio file', 'error')
-    }
-  }
-
   const handleSave = async () => {
     if (!profile) return
     setSaving(true)
@@ -90,9 +72,8 @@ export function EditPostModal({ post, open, onClose, onSaved }: { post: Post; op
         {
           caption,
           location,
-          audioTitle,
           taggedUserIds: taggedUsers.map((u) => u.id),
-          audioFile: newAudioFile ?? (audioRemoved ? null : undefined),
+          audioTrack: audioChange,
         },
         profile.id
       )
@@ -149,46 +130,10 @@ export function EditPostModal({ post, open, onClose, onSaved }: { post: Post; op
           <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-ink-700 dark:text-paper-200">
             <Music2 size={16} /> Music
           </label>
-          {newAudioFile || (audioUrl && !audioRemoved) ? (
-            <div className="space-y-2">
-              {newAudioFile ? (
-                <p className="text-xs text-ink-500">New track selected: {newAudioFile.name}</p>
-              ) : (
-                audioUrl && <AudioTrackPlayer url={audioUrl} title={audioTitle} compact />
-              )}
-              <input
-                value={audioTitle}
-                onChange={(e) => setAudioTitle(e.target.value)}
-                placeholder="Track title"
-                className="w-full rounded-lg border border-paper-200 bg-transparent p-2.5 text-sm outline-none focus:border-signal-400 dark:border-ink-700"
-              />
-              <button
-                onClick={() => {
-                  setNewAudioFile(null)
-                  setAudioRemoved(true)
-                }}
-                className="text-xs font-semibold text-ember-500"
-              >
-                Remove track
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => audioInputRef.current?.click()}
-              className="flex w-full items-center gap-2 rounded-lg border border-dashed border-paper-200 p-2.5 text-sm text-ink-500 hover:border-signal-400 dark:border-ink-700"
-            >
-              <Music2 size={16} /> Add a track you own the rights to
-            </button>
-          )}
-          <input
-            ref={audioInputRef}
-            type="file"
-            accept="audio/*"
-            hidden
-            onChange={(e) => {
-              handleAudioSelect(e.target.files?.[0])
-              e.target.value = ''
-            }}
+          <MusicField
+            track={audioChange === undefined ? null : audioChange}
+            onChange={setAudioChange}
+            fallbackTitle={audioChange === undefined && post.audio_url ? post.audio_title || 'Original audio' : undefined}
           />
         </div>
 

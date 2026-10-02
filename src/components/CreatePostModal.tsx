@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Image as ImageIcon, MapPin, Users, X, ChevronLeft, Music2, ImagePlus } from 'lucide-react'
+import { MusicField } from './MusicField'
 import { Modal, Spinner } from './Common'
 import { Avatar } from './Avatar'
 import { useAuth } from '@/contexts/AuthContext'
@@ -8,8 +9,8 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { createPost } from '@/services/posts'
 import { searchProfiles } from '@/services/profiles'
 import { searchLocations } from '@/services/locations'
-import { UploadValidationError, validateMediaFile, validateAudioFile } from '@/services/storage'
-import type { Profile } from '@/types'
+import { UploadValidationError, validateMediaFile } from '@/services/storage'
+import type { AudioTrack, Profile } from '@/types'
 
 type Step = 'select' | 'details'
 
@@ -25,12 +26,10 @@ export function CreatePostModal({ open, onClose, onCreated }: { open: boolean; o
   const [taggedUsers, setTaggedUsers] = useState<Profile[]>([])
   const [tagResults, setTagResults] = useState<Profile[]>([])
   const [coverFile, setCoverFile] = useState<File | null>(null)
-  const [audioFile, setAudioFile] = useState<File | null>(null)
-  const [audioTitle, setAudioTitle] = useState('')
+  const [audioTrack, setAudioTrack] = useState<AudioTrack | null>(null)
   const [publishing, setPublishing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
-  const audioInputRef = useRef<HTMLInputElement>(null)
   const debouncedTagQuery = useDebounce(tagQuery, 250)
   const debouncedLocation = useDebounce(location, 250)
   const isReel = files.length === 1 && files[0]?.type.startsWith('video/')
@@ -73,8 +72,7 @@ export function CreatePostModal({ open, onClose, onCreated }: { open: boolean; o
     setTagQuery('')
     setTagResults([])
     setCoverFile(null)
-    setAudioFile(null)
-    setAudioTitle('')
+    setAudioTrack(null)
   }
 
   const handleClose = () => {
@@ -104,17 +102,6 @@ export function CreatePostModal({ open, onClose, onCreated }: { open: boolean; o
     }
   }
 
-  const handleAudioSelect = (file?: File) => {
-    if (!file) return
-    try {
-      validateAudioFile(file)
-      setAudioFile(file)
-      if (!audioTitle) setAudioTitle(file.name.replace(/\.[^/.]+$/, ''))
-    } catch (e) {
-      showToast(e instanceof UploadValidationError ? e.message : 'Invalid audio file', 'error')
-    }
-  }
-
   const handlePublish = async () => {
     if (!profile) return
     setPublishing(true)
@@ -127,8 +114,7 @@ export function CreatePostModal({ open, onClose, onCreated }: { open: boolean; o
         files,
         taggedUserIds: taggedUsers.map((u) => u.id),
         coverFile: isReel && coverFile ? coverFile : undefined,
-        audioFile: audioFile ?? undefined,
-        audioTitle,
+        audioTrack,
       })
       showToast('Your post was published', 'success')
       onCreated?.()
@@ -270,36 +256,7 @@ export function CreatePostModal({ open, onClose, onCreated }: { open: boolean; o
             <label className="mt-4 flex items-center gap-2 text-sm font-medium text-ink-700 dark:text-paper-200">
               <Music2 size={18} /> Music
             </label>
-            {audioFile ? (
-              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-paper-200 p-2.5 dark:border-ink-700">
-                <input
-                  value={audioTitle}
-                  onChange={(e) => setAudioTitle(e.target.value)}
-                  placeholder="Track title"
-                  className="flex-1 bg-transparent text-sm outline-none"
-                />
-                <button onClick={() => setAudioFile(null)} className="ml-2 shrink-0 text-ink-400 hover:text-ember-500">
-                  <X size={16} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => audioInputRef.current?.click()}
-                className="mt-1.5 flex w-full items-center gap-2 rounded-lg border border-dashed border-paper-200 p-2.5 text-sm text-ink-500 hover:border-signal-400 dark:border-ink-700"
-              >
-                <Music2 size={16} /> Add a track you own the rights to (MP3, M4A, WAV)
-              </button>
-            )}
-            <input
-              ref={audioInputRef}
-              type="file"
-              accept="audio/*"
-              hidden
-              onChange={(e) => {
-                handleAudioSelect(e.target.files?.[0])
-                e.target.value = ''
-              }}
-            />
+            <MusicField track={audioTrack} onChange={setAudioTrack} />
 
             {isReel && (
               <>

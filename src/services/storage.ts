@@ -5,9 +5,17 @@ const MAX_VIDEO_BYTES = 100 * 1024 * 1024 // 100MB
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024 // 20MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
-const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/wav', 'audio/ogg']
+const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/ogg']
+const ALLOWED_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif']
+const ALLOWED_VIDEO_EXT = ['mp4', 'webm', 'mov']
+const ALLOWED_AUDIO_EXT = ['mp3', 'm4a', 'mp4', 'wav', 'ogg']
 
 export class UploadValidationError extends Error {}
+
+function extensionMatches(file: File, allowed: string[]) {
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  return allowed.includes(ext)
+}
 
 export function validateMediaFile(file: File) {
   const isImage = ALLOWED_IMAGE_TYPES.includes(file.type)
@@ -15,6 +23,11 @@ export function validateMediaFile(file: File) {
 
   if (!isImage && !isVideo) {
     throw new UploadValidationError('Unsupported file type. Use JPG, PNG, WEBP, GIF, MP4, WEBM or MOV.')
+  }
+  // Generated files (canvas blobs, thumbnails) always carry a matching name; for
+  // user files the extension must agree with the declared MIME type.
+  if ((isImage && !extensionMatches(file, ALLOWED_IMAGE_EXT)) || (isVideo && !extensionMatches(file, ALLOWED_VIDEO_EXT))) {
+    throw new UploadValidationError('File extension does not match its type.')
   }
   if (isImage && file.size > MAX_IMAGE_BYTES) {
     throw new UploadValidationError('Image is too large. Max size is 15MB.')
@@ -35,6 +48,9 @@ export function validateAudioFile(file: File) {
   if (!ALLOWED_AUDIO_TYPES.includes(file.type)) {
     throw new UploadValidationError('Unsupported audio type. Use MP3, M4A, WAV, or OGG.')
   }
+  if (!extensionMatches(file, ALLOWED_AUDIO_EXT)) {
+    throw new UploadValidationError('Audio file extension must be .mp3, .m4a, .wav or .ogg.')
+  }
   if (file.size > MAX_AUDIO_BYTES) {
     throw new UploadValidationError('Audio file is too large. Max size is 20MB.')
   }
@@ -42,15 +58,21 @@ export function validateAudioFile(file: File) {
 
 function extensionOf(file: File) {
   const parts = file.name.split('.')
-  return parts.length > 1 ? parts.pop() : file.type.split('/').pop() ?? 'bin'
+  return (parts.length > 1 ? parts.pop() : file.type.split('/').pop()) ?? 'bin'
 }
 
-export async function uploadToBucket(bucket: string, userId: string, file: File) {
-  validateMediaFile(file)
-  const path = `${userId}/${crypto.randomUUID()}.${extensionOf(file)}`
+export async function uploadToBucket(
+  bucket: string,
+  userId: string,
+  file: File,
+  validate: (file: File) => void = validateMediaFile
+) {
+  validate(file)
+  const path = `${userId}/${crypto.randomUUID()}.${extensionOf(file).toLowerCase()}`
   const { error } = await supabase.storage.from(bucket).upload(path, file, {
     cacheControl: '3600',
     upsert: false,
+    contentType: file.type,
   })
   if (error) throw error
   const { data } = supabase.storage.from(bucket).getPublicUrl(path)
