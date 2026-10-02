@@ -10,6 +10,8 @@ import { EditPostModal } from './EditPostModal'
 import { ShareModal } from './ShareModal'
 import { AudioTrackPlayer } from './AudioTrackPlayer'
 import { CommentSection } from './CommentSection'
+import { LikesModal } from './LikesModal'
+import { getPostLikers } from '@/services/likes'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { Post } from '@/types'
@@ -34,6 +36,7 @@ export function PostModal({
   const [menuOpen, setMenuOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [likesOpen, setLikesOpen] = useState(false)
   const { showToast } = useToast()
   const isOwn = profile?.id === post.user_id
   const media = post.media[mediaIndex]
@@ -175,7 +178,14 @@ export function PostModal({
                 <AudioTrackPlayer url={post.audio_url} title={post.audio_title} compact autoPlay={false} />
               </div>
             )}
-            <p className="px-2 pt-1 text-sm font-semibold">{formatCount(post.like_count)} likes</p>
+            <p className="px-2 pt-1 text-sm"><button
+          onClick={() => post.like_count > 0 && setLikesOpen(true)}
+          disabled={post.like_count === 0}
+          className="font-semibold hover:underline disabled:no-underline"
+          aria-label="See who liked this"
+        >
+          {formatCount(post.like_count)} {post.like_count === 1 ? 'like' : 'likes'}
+        </button></p>
             <p className="px-2 text-xs uppercase tracking-wide text-ink-500 dark:text-paper-200/50">
               {timeAgo(post.created_at)} ago · {commentCount} comments
             </p>
@@ -193,6 +203,7 @@ export function PostModal({
       />
       <EditPostModal post={post} open={editOpen} onClose={() => setEditOpen(false)} onSaved={(p) => onChange?.(p)} />
       <ShareModal post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
+      <LikesModal open={likesOpen} onClose={() => setLikesOpen(false)} load={() => getPostLikers(post.id)} />
     </div>,
     document.body
   )

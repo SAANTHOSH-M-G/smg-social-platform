@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, X } from 'lucide-react'
+import { Heart, Plus, X } from 'lucide-react'
+import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { Modal } from './Common'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { getNotesFeed, upsertNote, deleteNote } from '@/services/notes'
 import { getOrCreateDirectConversation, sendTextMessage } from '@/services/messages'
-import type { Note } from '@/types'
+import { getNoteLikers, hasLikedNote, toggleNoteLike } from '@/services/likes'
+import type { Note, Profile } from '@/types'
 
 export function NotesBar() {
   const { profile } = useAuth()
@@ -19,6 +21,8 @@ export function NotesBar() {
   const [activeNote, setActiveNote] = useState<Note | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [likers, setLikers] = useState<Profile[]>([])
+  const [likersLoading, setLikersLoading] = useState(false)
 
   const load = () => {
     if (!profile) return
@@ -28,6 +32,24 @@ export function NotesBar() {
   }
 
   useEffect(load, [profile])
+
+  // who liked MY note: shown inside the "Update your note" sheet
+  const myNoteExists = Boolean(profile && notes.some((n) => n.user_id === profile.id))
+  useEffect(() => {
+    if (!composerOpen || !profile || !myNoteExists) {
+      setLikers([])
+      return
+    }
+    let cancelled = false
+    setLikersLoading(true)
+    getNoteLikers(profile.id)
+      .then((l) => !cancelled && setLikers(l))
+      .catch(() => !cancelled && setLikers([]))
+      .finally(() => !cancelled && setLikersLoading(false))
+    return () => {
+      cancelled = true
+    }
+  }, [composerOpen, profile, myNoteExists])
 
   if (!profile) return null
 
@@ -110,6 +132,22 @@ export function NotesBar() {
             className="w-full resize-none rounded-lg border border-paper-200 bg-transparent p-2.5 text-sm outline-none focus:border-signal-400 dark:border-ink-700"
           />
           <p className="mt-1 text-right text-xs text-ink-400">{draft.length}/60 · visible for 24 hours</p>
+          {myNote && (
+            <div className="mt-3 border-t border-paper-200 pt-3 dark:border-ink-700">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                <Heart size={14} className="fill-ember-500 text-ember-500" /> Liked by {likersLoading ? '…' : likers.length}
+              </p>
+              {!likersLoading && likers.length === 0 && <p className="text-xs text-ink-500">No likes on your note yet.</p>}
+              <div className="max-h-40 space-y-2 overflow-y-auto">
+                {likers.map((u) => (
+                  <div key={u.id} className="flex items-center gap-2.5">
+                    <Avatar src={u.avatar_url} name={u.full_name || u.username} size="sm" />
+                    <span className="truncate text-sm font-medium">{u.username}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-3 flex justify-end gap-2">
             {myNote && (
               <button onClick={handleDelete} className="rounded-lg px-4 py-2 text-sm font-semibold text-ember-500 hover:bg-paper-50 dark:hover:bg-ink-800">
@@ -127,13 +165,34 @@ export function NotesBar() {
         </div>
       </Modal>
 
-      {activeNote && <NoteViewer note={activeNote} onClose={() => setActiveNote(null)} onReply={handleReply} />}
+      {activeNote && <NoteViewer note={activeNote} meId={profile.id} onClose={() => setActiveNote(null)} onReply={handleReply} />}
     </div>
   )
 }
 
-function NoteViewer({ note, onClose, onReply }: { note: Note; onClose: () => void; onReply: (note: Note, text: string) => void }) {
+function NoteViewer({ note, meId, onClose, onReply }: { note: Note; meId: string; onClose: () => void; onReply: (note: Note, text: string) => void }) {
+  const { showToast } = useToast()
   const [reply, setReply] = useState('')
+  const [liked, setLiked] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    hasLikedNote(note.user_id, meId).then((l) => !cancelled && setLiked(l))
+    return () => {
+      cancelled = true
+    }
+  }, [note.user_id, meId])
+
+  const handleLike = async () => {
+    const next = !liked
+    setLiked(next)
+    try {
+      await toggleNoteLike(note.user_id, meId, liked)
+    } catch {
+      setLiked(!next)
+      showToast('Could not update like', 'error')
+    }
+  }
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -166,6 +225,9 @@ function NoteViewer({ note, onClose, onReply }: { note: Note; onClose: () => voi
           placeholder="Reply via message..."
           className="flex-1 rounded-full bg-paper-100 px-4 py-2 text-sm outline-none dark:bg-ink-800"
         />
+        <button onClick={handleLike} aria-label={liked ? 'Unlike note' : 'Like note'} aria-pressed={liked} className="shrink-0 transition-transform active:scale-90">
+          <Heart size={22} className={clsx(liked && 'fill-ember-500 text-ember-500')} />
+        </button>
         <button
           onClick={() => {
             onReply(note, reply)

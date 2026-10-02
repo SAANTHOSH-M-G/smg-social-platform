@@ -73,13 +73,25 @@ export async function markStoryViewed(storyId: string, userId: string) {
   await supabase.from('story_views').upsert({ story_id: storyId, user_id: userId }, { onConflict: 'story_id,user_id' })
 }
 
-export async function getStoryViewers(storyId: string): Promise<Profile[]> {
-  const { data, error } = await supabase
-    .from('story_views')
-    .select('viewer:profiles!story_views_user_id_fkey(*)')
-    .eq('story_id', storyId)
+export type StoryViewer = Profile & { liked: boolean }
+
+/** Everyone who viewed the story, with `liked` set for those who also liked it (likers listed first). */
+export async function getStoryViewers(storyId: string): Promise<StoryViewer[]> {
+  const [{ data: views, error }, { data: likes }] = await Promise.all([
+    supabase.from('story_views').select('viewed_at, viewer:profiles!story_views_user_id_fkey(*)').eq('story_id', storyId).order('viewed_at', { ascending: false }),
+    supabase.from('story_likes').select('user_id').eq('story_id', storyId),
+  ])
   if (error) throw error
-  return ((data ?? []) as unknown as { viewer: Profile }[]).map((r) => r.viewer)
+  const likedIds = new Set((likes ?? []).map((l) => l.user_id))
+  const viewers = ((views ?? []) as unknown as { viewer: Profile }[]).map((r) => ({ ...r.viewer, liked: likedIds.has(r.viewer.id) }))
+  // a liker who somehow has no view row (e.g. liked from a shared link) should still appear
+  const seen = new Set(viewers.map((v) => v.id))
+  const missing = [...likedIds].filter((id) => !seen.has(id))
+  if (missing.length) {
+    const { data: profiles } = await supabase.from('profiles').select('*').in('id', missing)
+    ;((profiles ?? []) as Profile[]).forEach((p) => viewers.push({ ...p, liked: true }))
+  }
+  return viewers.sort((a, b) => Number(b.liked) - Number(a.liked))
 }
 
 /** Used by shared /story/:id links. RLS naturally returns nothing if the viewer isn't allowed to see it (expired, private account not followed, etc). */

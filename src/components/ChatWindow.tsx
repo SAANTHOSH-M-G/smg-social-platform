@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCheck, Image as ImageIcon, Send, Trash2, ArrowDown, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Check, CheckCheck, Image as ImageIcon, Send, Trash2, ArrowDown, AlertCircle, SmilePlus } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { ConfirmDialog, Spinner } from './Common'
@@ -17,6 +17,11 @@ import {
   subscribeToReadReceipts,
   subscribeToTyping,
   subscribeToPresence,
+  getReactions,
+  setReaction,
+  subscribeToReactions,
+  REACTION_EMOJIS,
+  type MessageReaction,
   setTyping,
   getPresence,
   isPresenceLive,
@@ -54,6 +59,10 @@ export function ChatWindow({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [showJump, setShowJump] = useState(false)
   const [sendingMedia, setSendingMedia] = useState(false)
+  const [reactions, setReactions] = useState<MessageReaction[]>([])
+  const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const fetchedReactionIds = useRef(new Set<string>())
+  const messageIdsRef = useRef(new Set<string>())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
@@ -139,6 +148,39 @@ export function ChatWindow({
       unsub()
     }
   }, [other?.id])
+
+  // reactions: load for any messages we haven't fetched yet, then keep them live
+  useEffect(() => {
+    messageIdsRef.current = new Set(messages.filter((m) => !m.pending).map((m) => m.id))
+    const missing = [...messageIdsRef.current].filter((id) => !fetchedReactionIds.current.has(id))
+    if (!missing.length) return
+    missing.forEach((id) => fetchedReactionIds.current.add(id))
+    getReactions(missing)
+      .then((rows) =>
+        setReactions((prev) => [...prev.filter((r) => !rows.some((n) => n.message_id === r.message_id && n.user_id === r.user_id)), ...rows])
+      )
+      .catch(() => missing.forEach((id) => fetchedReactionIds.current.delete(id)))
+  }, [messages])
+
+  useEffect(() => {
+    return subscribeToReactions((event, row) => {
+      if (!messageIdsRef.current.has(row.message_id)) return
+      setReactions((prev) => {
+        const rest = prev.filter((r) => !(r.message_id === row.message_id && r.user_id === row.user_id))
+        return event === 'set' ? [...rest, row] : rest
+      })
+    })
+  }, [])
+
+  // close the emoji bar when clicking anywhere else
+  useEffect(() => {
+    if (!pickerFor) return
+    const close = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-reaction-ui]')) setPickerFor(null)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [pickerFor])
 
   // keep pinned to the bottom for new messages; preserve position when older history is prepended
   useLayoutEffect(() => {
@@ -244,6 +286,26 @@ export function ChatWindow({
     }
   }
 
+  const handleReact = async (messageId: string, emoji: string) => {
+    if (!meId) return
+    const mine = reactions.find((r) => r.message_id === messageId && r.user_id === meId)
+    const next = mine?.emoji === emoji ? null : emoji // same emoji again = remove
+    setPickerFor(null)
+    const snapshot = reactions
+    setReactions((prev) => {
+      const rest = prev.filter((r) => !(r.message_id === messageId && r.user_id === meId))
+      return next ? [...rest, { message_id: messageId, user_id: meId, emoji: next }] : rest
+    })
+    try {
+      await setReaction(messageId, meId, next)
+    } catch {
+      setReactions(snapshot)
+      showToast('Could not react to message', 'error')
+    }
+  }
+
+  const nameOf = (userId: string) => (userId === meId ? 'You' : conversation.members.find((m) => m.id === userId)?.username ?? 'Someone')
+
   const handleDelete = async () => {
     if (!meId || !confirmDeleteId) return
     const id = confirmDeleteId
@@ -324,6 +386,9 @@ export function ChatWindow({
               const next = messages[i + 1]
               const newDay = !prev || !isSameDay(prev.created_at, m.created_at)
               const endOfRun = !next || next.sender_id !== m.sender_id || !isSameDay(next.created_at, m.created_at)
+              const msgReactions = reactions.filter((r) => r.message_id === m.id)
+              const myReaction = msgReactions.find((r) => r.user_id === meId)
+              const myReactions = msgReactions
               return (
                 <Fragment key={m.id}>
                   {newDay && (
@@ -339,25 +404,85 @@ export function ChatWindow({
                         <Trash2 size={14} />
                       </button>
                     )}
-                    <div
-                      title={new Date(m.created_at).toLocaleString()}
-                      className={clsx(
-                        'max-w-[78%] break-words rounded-2xl px-3.5 py-2 text-sm [overflow-wrap:anywhere]',
-                        isMine ? 'bg-signal-500 text-white' : 'bg-paper-100 dark:bg-ink-800',
-                        m.pending && 'opacity-60',
-                        m.failed && 'bg-ember-500/90'
+                    {!m.deleted_at && !m.pending && !m.failed && (
+                      <button
+                        onClick={() => setPickerFor((cur) => (cur === m.id ? null : m.id))}
+                        aria-label="React to message"
+                        data-reaction-ui
+                        className={clsx(
+                          'order-last rounded-full p-1 text-ink-400 opacity-0 hover:bg-paper-100 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-ink-800',
+                          isMine && 'order-first'
+                        )}
+                      >
+                        <SmilePlus size={15} />
+                      </button>
+                    )}
+                    <div className={clsx('relative max-w-[78%]', myReactions.length > 0 && 'mb-3')} data-reaction-ui>
+                      {pickerFor === m.id && (
+                        <div
+                          className={clsx(
+                            'absolute -top-11 z-10 flex gap-0.5 rounded-full bg-white px-1.5 py-1 shadow-soft ring-1 ring-paper-200 dark:bg-ink-800 dark:ring-ink-700',
+                            isMine ? 'right-0' : 'left-0'
+                          )}
+                          role="menu"
+                        >
+                          {REACTION_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              role="menuitem"
+                              onClick={() => handleReact(m.id, emoji)}
+                              aria-label={`React ${emoji}`}
+                              className={clsx(
+                                'rounded-full px-1.5 py-0.5 text-xl transition-transform hover:scale-125',
+                                myReaction?.emoji === emoji && 'bg-signal-50 dark:bg-ink-700'
+                              )}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
                       )}
-                    >
-                      {m.deleted_at ? (
-                        <span className="italic opacity-70">Message removed</span>
-                      ) : m.media_url ? (
-                        m.media_type === 'video' ? (
-                          <video src={m.media_url} controls playsInline preload="metadata" className="max-h-72 max-w-[220px] rounded-lg" />
+                      <div
+                        title={new Date(m.created_at).toLocaleString()}
+                        onClick={() => !m.deleted_at && !m.pending && !m.failed && setPickerFor((cur) => (cur === m.id ? null : m.id))}
+                        onDoubleClick={() => !m.deleted_at && !m.pending && !m.failed && handleReact(m.id, '❤️')}
+                        className={clsx(
+                          'cursor-pointer break-words rounded-2xl px-3.5 py-2 text-sm [overflow-wrap:anywhere]',
+                          isMine ? 'bg-signal-500 text-white' : 'bg-paper-100 dark:bg-ink-800',
+                          m.pending && 'opacity-60',
+                          m.failed && 'bg-ember-500/90'
+                        )}
+                      >
+                        {m.deleted_at ? (
+                          <span className="italic opacity-70">Message removed</span>
+                        ) : m.media_url ? (
+                          m.media_type === 'video' ? (
+                            <video src={m.media_url} controls playsInline preload="metadata" className="max-h-72 max-w-[220px] rounded-lg" onClick={(e) => e.stopPropagation()} />
+                          ) : (
+                            <img src={m.media_url} alt="Attachment" loading="lazy" className="max-h-72 max-w-[220px] rounded-lg object-cover" />
+                          )
                         ) : (
-                          <img src={m.media_url} alt="Attachment" loading="lazy" className="max-h-72 max-w-[220px] rounded-lg object-cover" />
-                        )
-                      ) : (
-                        <span className="whitespace-pre-wrap">{m.content}</span>
+                          <span className="whitespace-pre-wrap">{m.content}</span>
+                        )}
+                      </div>
+                      {msgReactions.length > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (myReaction) void handleReact(m.id, myReaction.emoji)
+                          }}
+                          title={msgReactions.map((r) => `${nameOf(r.user_id)}: ${r.emoji}`).join('\n')}
+                          aria-label={`Reactions: ${msgReactions.map((r) => `${nameOf(r.user_id)} ${r.emoji}`).join(', ')}`}
+                          className={clsx(
+                            'absolute -bottom-3 flex items-center gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-xs shadow ring-1 ring-paper-200 dark:bg-ink-800 dark:ring-ink-700',
+                            isMine ? 'right-2' : 'left-2'
+                          )}
+                        >
+                          {[...new Set(msgReactions.map((r) => r.emoji))].map((e) => (
+                            <span key={e}>{e}</span>
+                          ))}
+                          {msgReactions.length > 1 && <span className="ml-0.5 font-semibold text-ink-600 dark:text-paper-200">{msgReactions.length}</span>}
+                        </button>
                       )}
                     </div>
                   </div>

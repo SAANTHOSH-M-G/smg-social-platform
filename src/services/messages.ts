@@ -265,3 +265,45 @@ export function subscribeToPresence(userId: string, onChange: (row: PresenceRow)
     void supabase.removeChannel(channel)
   }
 }
+
+// ---- reactions (one emoji per person per message) ----
+export const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🔥'] as const
+
+export interface MessageReaction {
+  message_id: string
+  user_id: string
+  emoji: string
+}
+
+export async function getReactions(messageIds: string[]): Promise<MessageReaction[]> {
+  if (!messageIds.length) return []
+  const { data, error } = await supabase.from('message_reactions').select('message_id, user_id, emoji').in('message_id', messageIds)
+  if (error) throw error
+  return (data ?? []) as MessageReaction[]
+}
+
+/** Pass `emoji = null` to remove your reaction; picking a different emoji replaces it. */
+export async function setReaction(messageId: string, userId: string, emoji: string | null) {
+  if (emoji === null) {
+    const { error } = await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', userId)
+    if (error) throw error
+    return
+  }
+  const { error } = await supabase
+    .from('message_reactions')
+    .upsert({ message_id: messageId, user_id: userId, emoji }, { onConflict: 'message_id,user_id' })
+  if (error) throw error
+}
+
+/** RLS limits the stream to messages in your own conversations; callers ignore ids they don't show. */
+export function subscribeToReactions(onChange: (event: 'set' | 'remove', row: MessageReaction) => void) {
+  const channel = supabase
+    .channel(topic('reactions'))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions' }, (p) => onChange('set', p.new as MessageReaction))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'message_reactions' }, (p) => onChange('set', p.new as MessageReaction))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_reactions' }, (p) => onChange('remove', p.old as MessageReaction))
+    .subscribe()
+  return () => {
+    void supabase.removeChannel(channel)
+  }
+}

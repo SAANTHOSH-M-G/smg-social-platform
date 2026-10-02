@@ -7,7 +7,7 @@ import { Spinner } from './Common'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { StoryGroup } from '@/types'
-import { markStoryViewed, deleteStory, getStoryViewers, toggleStoryLike, replyToStory } from '@/services/stories'
+import { markStoryViewed, deleteStory, getStoryViewers, toggleStoryLike, replyToStory, type StoryViewer as StoryViewerRow } from '@/services/stories'
 import { timeAgo } from '@/utils/format'
 import { ConfirmDialog } from './Common'
 
@@ -45,7 +45,7 @@ export function StoryViewer({
   const [mediaError, setMediaError] = useState(false)
   const [muted, setMuted] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [viewers, setViewers] = useState<{ id: string; avatar_url: string; username: string }[]>([])
+  const [viewers, setViewers] = useState<StoryViewerRow[]>([])
   const [showViewers, setShowViewers] = useState(false)
   const [liked, setLiked] = useState(false)
   const [likeCount, setLikeCount] = useState(0)
@@ -498,12 +498,18 @@ export function StoryViewer({
       {showViewers && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setShowViewers(false)}>
           <div className="max-h-[70vh] w-full max-w-sm overflow-y-auto rounded-t-2xl bg-white p-4 dark:bg-ink-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 font-semibold">Viewed by {viewers.length}</h3>
+            <h3 className="mb-3 font-semibold">
+              Viewed by {viewers.length}
+              <span className="ml-2 inline-flex items-center gap-1 text-sm font-medium text-ember-500">
+                <Heart size={13} className="fill-current" /> {viewers.filter((v) => v.liked).length}
+              </span>
+            </h3>
             <div className="space-y-3">
               {viewers.map((v) => (
                 <div key={v.id} className="flex items-center gap-3">
-                  <Avatar src={v.avatar_url} name={v.username} size="sm" />
-                  <span className="text-sm font-medium">{v.username}</span>
+                  <Avatar src={v.avatar_url} name={v.full_name || v.username} size="sm" />
+                  <span className="flex-1 truncate text-sm font-medium">{v.username}</span>
+                  {v.liked && <Heart size={16} className="shrink-0 fill-ember-500 text-ember-500" aria-label="Liked your story" />}
                 </div>
               ))}
               {viewers.length === 0 && <p className="text-sm text-ink-500">No views yet.</p>}

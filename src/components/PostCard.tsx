@@ -23,6 +23,8 @@ import { EditPostModal } from './EditPostModal'
 import { ShareModal } from './ShareModal'
 import { AudioTrackPlayer } from './AudioTrackPlayer'
 import { FeedVideo } from './FeedVideo'
+import { LikesModal } from './LikesModal'
+import { getPostLikers } from '@/services/likes'
 import { useFeedSound } from '@/hooks/useFeedSound'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -51,6 +53,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
   const [editOpen, setEditOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [likeBurst, setLikeBurst] = useState(false)
+  const [likesOpen, setLikesOpen] = useState(false)
   const [soundOn, setSoundOn] = useFeedSound()
   const [soundBlocked, setSoundBlocked] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -256,7 +259,14 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
       </div>
 
       <div className="space-y-1 px-3.5 pt-1 text-sm">
-        <p className="font-semibold">{formatCount(post.like_count)} likes</p>
+        <p><button
+          onClick={() => post.like_count > 0 && setLikesOpen(true)}
+          disabled={post.like_count === 0}
+          className="font-semibold hover:underline disabled:no-underline"
+          aria-label="See who liked this"
+        >
+          {formatCount(post.like_count)} {post.like_count === 1 ? 'like' : 'likes'}
+        </button></p>
         {post.caption && (
           <p>
             <Link to={`/${post.author.username}`} className="mr-1.5 font-semibold hover:underline">
@@ -297,6 +307,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       />
+      <LikesModal open={likesOpen} onClose={() => setLikesOpen(false)} load={() => getPostLikers(post.id)} />
     </article>
   )
 }

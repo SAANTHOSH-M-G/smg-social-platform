@@ -13,6 +13,8 @@ import { formatCount } from '@/utils/format'
 import { CommentSection } from './CommentSection'
 import { ShareModal } from './ShareModal'
 import { Modal } from './Common'
+import { LikesModal } from './LikesModal'
+import { getPostLikers } from '@/services/likes'
 
 const SOUND_KEY = 'smg.reels.sound'
 const WHEEL_LOCK_MS = 800
@@ -83,6 +85,7 @@ const ReelSlide = memo(function ReelSlide({ post, isActive, preload, soundOn, so
   const [expanded, setExpanded] = useState(false)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [likesOpen, setLikesOpen] = useState(false)
   const [burst, setBurst] = useState<{ x: number; y: number; id: number } | null>(null)
   const isOwn = profile?.id === post.user_id
   const media = post.media[0]
@@ -333,7 +336,13 @@ const ReelSlide = memo(function ReelSlide({ post, isActive, preload, soundOn, so
         <div className="pointer-events-auto flex flex-col items-center gap-5">
           <button onClick={handleLike} aria-label={post.liked_by_me ? 'Unlike' : 'Like'} aria-pressed={post.liked_by_me} className="flex flex-col items-center gap-1">
             <Heart size={28} className={clsx('transition-transform active:scale-90', post.liked_by_me && 'fill-ember-500 text-ember-500')} />
-            <span className="text-xs font-semibold">{formatCount(post.like_count)}</span>
+          </button>
+          <button
+            onClick={() => setLikesOpen(true)}
+            aria-label="See who liked this reel"
+            className="-mt-4 text-xs font-semibold hover:underline"
+          >
+            {formatCount(post.like_count)}
           </button>
           <button onClick={() => setCommentsOpen(true)} aria-label="Comments" className="flex flex-col items-center gap-1">
             <MessageCircle size={28} />
@@ -361,6 +370,7 @@ const ReelSlide = memo(function ReelSlide({ post, isActive, preload, soundOn, so
         </Modal>
       )}
       {shareOpen && <ShareModal post={post} open onClose={() => setShareOpen(false)} />}
+      {likesOpen && <LikesModal open onClose={() => setLikesOpen(false)} load={() => getPostLikers(post.id)} />}
     </div>
   )
 })
