@@ -172,7 +172,7 @@ export function PostModal({
             </div>
             {post.audio_url && (
               <div className="px-2 pt-1">
-                <AudioTrackPlayer url={post.audio_url} title={post.audio_title} compact />
+                <AudioTrackPlayer url={post.audio_url} title={post.audio_title} compact autoPlay={false} />
               </div>
             )}
             <p className="px-2 pt-1 text-sm font-semibold">{formatCount(post.like_count)} likes</p>

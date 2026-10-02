@@ -1,51 +1,37 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Play, Pause, Music2, Volume2, VolumeX } from 'lucide-react'
 import clsx from 'clsx'
+import { useFeedSound, getFeedSound, setFeedSound, registerMedia, claimPlayback } from '@/hooks/useFeedSound'
 
-const FEED_SOUND_KEY = 'smg.feed.sound'
 const VISIBLE_RATIO = 0.6
-
-function readFeedSound(): boolean {
-  try {
-    return sessionStorage.getItem(FEED_SOUND_KEY) !== 'off'
-  } catch {
-    return true
-  }
-}
-
-// Module-level so every player in the feed shares one sound preference and only one track plays at a time.
-let feedSoundOn = readFeedSound()
-let current: HTMLAudioElement | null = null
-const listeners = new Set<() => void>()
-function setFeedSound(on: boolean) {
-  feedSoundOn = on
-  try {
-    sessionStorage.setItem(FEED_SOUND_KEY, on ? 'on' : 'off')
-  } catch {
-    /* ignore */
-  }
-  listeners.forEach((l) => l())
-}
 
 /**
  * Music attached to a post. Starts by itself when the post is mostly on screen, stops as soon as it
- * scrolls away (or the tab is hidden), and never overlaps another post's track. The play/pause button
- * is a manual override; the speaker button mutes/unmutes feed music for the rest of the session.
+ * scrolls away (or the tab is hidden), never overlaps another post, and follows the shared feed sound
+ * setting - muting one post mutes all of them, unmuting turns them all back on.
  *
- * `watchRef` is the element whose visibility drives playback (the post's media); defaults to this pill.
+ * `variant="label"` renders just the "♪ title · artist" line (the speaker button lives on the post's
+ * media); `variant="pill"` adds play/pause and a speaker button (used in the post modal).
+ * `watchRef` is the element whose visibility drives playback (the post's media).
  */
 export function AudioTrackPlayer({
   url,
   title,
+  postId,
   compact = false,
+  variant = 'pill',
   watchRef,
   autoPlay = true,
+  onBlockedChange,
 }: {
   url: string
   title: string
+  postId?: string
   compact?: boolean
+  variant?: 'pill' | 'label'
   watchRef?: RefObject<HTMLElement>
   autoPlay?: boolean
+  onBlockedChange?: (blocked: boolean) => void
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -53,35 +39,34 @@ export function AudioTrackPlayer({
   const userPausedRef = useRef(false)
   const blockedRef = useRef(false)
   const [playing, setPlaying] = useState(false)
-  const [soundOn, setSoundOn] = useState(feedSoundOn)
+  const [soundOn] = useFeedSound()
+  const group = postId ?? url
+
+  const setBlocked = (b: boolean) => {
+    blockedRef.current = b
+    onBlockedChange?.(b)
+  }
 
   const play = async () => {
     const audio = audioRef.current
     if (!audio) return
-    if (current && current !== audio) current.pause() // one track at a time
-    audio.muted = !feedSoundOn
+    claimPlayback(group)
+    audio.muted = !getFeedSound()
     try {
       await audio.play()
-      current = audio
-      blockedRef.current = false
+      setBlocked(false)
     } catch {
-      // Browser refused autoplay (no interaction yet): retry on the next real gesture while still in view.
-      blockedRef.current = true
+      // Browser refused autoplay (no interaction yet): retry on the next real gesture while in view.
+      if (getFeedSound()) setBlocked(true)
     }
   }
 
-  const pause = () => {
-    const audio = audioRef.current
-    audio?.pause()
-    if (current === audio) current = null
-  }
+  const pause = () => audioRef.current?.pause()
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-
-    const sync = () => setSoundOn(feedSoundOn)
-    listeners.add(sync)
+    const unregister = registerMedia(group, audio)
 
     const target = watchRef?.current ?? rootRef.current
     let observer: IntersectionObserver | undefined
@@ -93,8 +78,8 @@ export function AudioTrackPlayer({
           if (visible) {
             if (!userPausedRef.current && document.visibilityState === 'visible') void play()
           } else {
-            userPausedRef.current = false // next time it scrolls into view it autoplays again
-            blockedRef.current = false
+            userPausedRef.current = false // autoplays again next time it scrolls into view
+            setBlocked(false)
             pause()
           }
         },
@@ -115,17 +100,21 @@ export function AudioTrackPlayer({
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
-      listeners.delete(sync)
+      unregister()
       observer?.disconnect()
       gestures.forEach((g) => window.removeEventListener(g, onGesture))
       document.removeEventListener('visibilitychange', onVisibility)
       audio.pause()
-      if (current === audio) current = null
     }
-  }, [url, autoPlay, watchRef])
+  }, [url, group, autoPlay, watchRef])
 
+  // shared mute button: apply instantly, and (re)start if sound was just turned on while this post is visible
   useEffect(() => {
-    if (audioRef.current) audioRef.current.muted = !soundOn
+    const audio = audioRef.current
+    if (!audio) return
+    audio.muted = !soundOn
+    if (soundOn && inViewRef.current && !userPausedRef.current && (audio.paused || blockedRef.current)) void play()
+    if (!soundOn) setBlocked(false)
   }, [soundOn])
 
   const toggle = (e: React.MouseEvent) => {
@@ -139,11 +128,26 @@ export function AudioTrackPlayer({
     }
   }
 
-  const toggleSound = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setFeedSound(!feedSoundOn)
-    // turning sound on from a click is a valid gesture: start now if this post is on screen
-    if (!feedSoundOn === true && inViewRef.current && !userPausedRef.current) void play()
+  const audioEl = (
+    <audio
+      ref={audioRef}
+      src={url}
+      loop
+      onPlay={() => setPlaying(true)}
+      onPause={() => setPlaying(false)}
+      onEnded={() => setPlaying(false)}
+      preload="metadata"
+    />
+  )
+
+  if (variant === 'label') {
+    return (
+      <div ref={rootRef} className="flex min-w-0 items-center gap-1.5 text-xs text-ink-600 dark:text-paper-200/80">
+        <Music2 size={12} className="shrink-0" />
+        <span className="truncate">{title || 'Original audio'}</span>
+        {audioEl}
+      </div>
+    )
   }
 
   return (
@@ -160,18 +164,17 @@ export function AudioTrackPlayer({
       </button>
       <Music2 size={14} className="shrink-0 text-ink-500 dark:text-paper-200/60" />
       <span className="min-w-0 flex-1 truncate font-medium">{title || 'Original audio'}</span>
-      <button onClick={toggleSound} aria-label={soundOn ? 'Mute music' : 'Unmute music'} className="shrink-0 text-ink-500 hover:text-ink-900 dark:text-paper-200/60 dark:hover:text-paper-50">
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setFeedSound(!soundOn)
+        }}
+        aria-label={soundOn ? 'Mute' : 'Unmute'}
+        className="shrink-0 text-ink-500 hover:text-ink-900 dark:text-paper-200/60 dark:hover:text-paper-50"
+      >
         {soundOn ? <Volume2 size={14} /> : <VolumeX size={14} />}
       </button>
-      <audio
-        ref={audioRef}
-        src={url}
-        loop
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        preload="metadata"
-      />
+      {audioEl}
     </div>
   )
 }

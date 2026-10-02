@@ -12,6 +12,8 @@ import {
   Flag,
   Link2,
   Pencil,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
@@ -20,6 +22,8 @@ import { ConfirmDialog } from './Common'
 import { EditPostModal } from './EditPostModal'
 import { ShareModal } from './ShareModal'
 import { AudioTrackPlayer } from './AudioTrackPlayer'
+import { FeedVideo } from './FeedVideo'
+import { useFeedSound } from '@/hooks/useFeedSound'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import type { Post } from '@/types'
@@ -47,6 +51,8 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
   const [editOpen, setEditOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [likeBurst, setLikeBurst] = useState(false)
+  const [soundOn, setSoundOn] = useFeedSound()
+  const [soundBlocked, setSoundBlocked] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const mediaRef = useRef<HTMLDivElement>(null)
   useOnClickOutside(menuRef, () => setMenuOpen(false))
@@ -131,7 +137,18 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
             </Link>
             {post.location && <span className="truncate text-ink-500 dark:text-paper-200/60">· {post.location}</span>}
           </div>
-          <span className="text-xs text-ink-500 dark:text-paper-200/60">{timeAgo(post.created_at)} ago</span>
+          {post.audio_url ? (
+            <AudioTrackPlayer
+              url={post.audio_url}
+              postId={post.id}
+              variant="label"
+              title={[post.audio_artist, post.audio_title].filter(Boolean).join(' • ') || 'Original audio'}
+              watchRef={mediaRef}
+              onBlockedChange={setSoundBlocked}
+            />
+          ) : (
+            <span className="text-xs text-ink-500 dark:text-paper-200/60">{timeAgo(post.created_at)} ago</span>
+          )}
         </div>
         {!isOwn && <FollowButton target={post.author} size="sm" />}
         <div className="relative" ref={menuRef}>
@@ -176,9 +193,22 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
 
       <div ref={mediaRef} className="relative aspect-square w-full select-none bg-ink-950/5" onDoubleClick={handleLike}>
         {media?.media_type === 'video' ? (
-          <video src={media.media_url} className="h-full w-full object-cover" controls playsInline />
+          <FeedVideo postId={post.id} src={media.media_url} poster={post.cover_url} hasMusic={Boolean(post.audio_url)} onBlockedChange={setSoundBlocked} />
         ) : (
           <img src={media?.media_url} alt={post.caption} className="h-full w-full object-cover" loading="lazy" />
+        )}
+        {(media?.media_type === 'video' || post.audio_url) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setSoundOn(soundBlocked ? true : !soundOn)
+            }}
+            aria-label={soundOn && !soundBlocked ? 'Mute' : 'Unmute'}
+            title={soundOn && !soundBlocked ? 'Mute' : 'Unmute'}
+            className="absolute bottom-3 right-3 z-10 rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-black/75"
+          >
+            {soundOn && !soundBlocked ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          </button>
         )}
         {likeBurst && (
           <Heart size={96} className="pointer-events-none absolute inset-0 m-auto animate-pop-in fill-white text-white drop-shadow-lg" />
@@ -226,11 +256,6 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
       </div>
 
       <div className="space-y-1 px-3.5 pt-1 text-sm">
-        {post.audio_url && (
-          <div className="pb-0.5">
-            <AudioTrackPlayer url={post.audio_url} title={post.audio_artist ? `${post.audio_title} · ${post.audio_artist}` : post.audio_title} compact watchRef={mediaRef} />
-          </div>
-        )}
         <p className="font-semibold">{formatCount(post.like_count)} likes</p>
         {post.caption && (
           <p>
