@@ -11,6 +11,7 @@ function previewOf(c: Conversation, meId?: string) {
   if (!m) return 'Say hello 👋'
   const prefix = m.sender_id === meId ? 'You: ' : ''
   if (m.deleted_at) return `${prefix}Message deleted`
+  if (m.view_once) return `${prefix}Sent a view-once photo`
   if (m.media_url) return `${prefix}${m.media_type === 'video' ? 'Sent a video' : 'Sent a photo'}`
   return `${prefix}${m.content}`
 }

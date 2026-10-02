@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCheck, Image as ImageIcon, Send, Trash2, ArrowDown, AlertCircle, SmilePlus } from 'lucide-react'
+import { ArrowLeft, Check, CheckCheck, Image as ImageIcon, Send, Trash2, ArrowDown, AlertCircle, SmilePlus, Eye, ImageOff } from 'lucide-react'
+import { MediaLightbox } from './MediaLightbox'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { ConfirmDialog, Spinner } from './Common'
@@ -21,7 +22,11 @@ import {
   setReaction,
   subscribeToReactions,
   REACTION_EMOJIS,
+  openViewOnce,
+  getOnceViews,
+  subscribeToOnceViews,
   type MessageReaction,
+  type OnceView,
   setTyping,
   getPresence,
   isPresenceLive,
@@ -61,6 +66,12 @@ export function ChatWindow({
   const [sendingMedia, setSendingMedia] = useState(false)
   const [reactions, setReactions] = useState<MessageReaction[]>([])
   const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const [viewOnceMode, setViewOnceMode] = useState(false)
+  const [onceViews, setOnceViews] = useState<OnceView[]>([])
+  const [openingOnce, setOpeningOnce] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<{ url: string; type: 'image' | 'video'; note?: string } | null>(null)
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set())
+  const fetchedOnceIds = useRef(new Set<string>())
   const fetchedReactionIds = useRef(new Set<string>())
   const messageIdsRef = useRef(new Set<string>())
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -172,6 +183,22 @@ export function ChatWindow({
     })
   }, [])
 
+  // view-once: which of these photos have been opened (by me as recipient / by them as sender)
+  useEffect(() => {
+    const ids = messages.filter((m) => m.view_once && !m.pending && !fetchedOnceIds.current.has(m.id)).map((m) => m.id)
+    if (!ids.length) return
+    ids.forEach((id) => fetchedOnceIds.current.add(id))
+    getOnceViews(ids)
+      .then((rows) => setOnceViews((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.message_id === r.message_id && p.user_id === r.user_id))]))
+      .catch(() => ids.forEach((id) => fetchedOnceIds.current.delete(id)))
+  }, [messages])
+
+  useEffect(() => {
+    return subscribeToOnceViews((row) =>
+      setOnceViews((prev) => (prev.some((p) => p.message_id === row.message_id && p.user_id === row.user_id) ? prev : [...prev, row]))
+    )
+  }, [])
+
   // close the emoji bar when clicking anywhere else
   useEffect(() => {
     if (!pickerFor) return
@@ -275,9 +302,10 @@ export function ChatWindow({
     try {
       validateMediaFile(file)
       setSendingMedia(true)
-      const sent = await sendMediaMessage(conversation.id, meId, file)
+      const sent = await sendMediaMessage(conversation.id, meId, file, viewOnceMode)
       stickToBottom.current = true
       setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]))
+      setViewOnceMode(false)
       onActivity?.()
     } catch (e) {
       showToast(e instanceof UploadValidationError ? e.message : 'Could not send attachment', 'error')
@@ -305,6 +333,22 @@ export function ChatWindow({
   }
 
   const nameOf = (userId: string) => (userId === meId ? 'You' : conversation.members.find((m) => m.id === userId)?.username ?? 'Someone')
+
+  const handleOpenOnce = async (messageId: string) => {
+    if (openingOnce) return
+    setOpeningOnce(messageId)
+    try {
+      const url = await openViewOnce(messageId)
+      setOnceViews((prev) => (meId ? [...prev, { message_id: messageId, user_id: meId }] : prev))
+      setLightbox({ url, type: 'image', note: 'View once - this photo disappears when you close it' })
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not open photo', 'error')
+      // someone may have opened it on another device: refresh our knowledge
+      fetchedOnceIds.current.delete(messageId)
+    } finally {
+      setOpeningOnce(null)
+    }
+  }
 
   const handleDelete = async () => {
     if (!meId || !confirmDeleteId) return
@@ -455,11 +499,51 @@ export function ChatWindow({
                       >
                         {m.deleted_at ? (
                           <span className="italic opacity-70">Message removed</span>
-                        ) : m.media_url ? (
-                          m.media_type === 'video' ? (
-                            <video src={m.media_url} controls playsInline preload="metadata" className="max-h-72 max-w-[220px] rounded-lg" onClick={(e) => e.stopPropagation()} />
+                        ) : m.view_once ? (
+                          isMine ? (
+                            <span className="flex items-center gap-2">
+                              <Eye size={16} /> {onceViews.some((v) => v.message_id === m.id) ? 'Opened' : 'View-once photo · not opened'}
+                            </span>
+                          ) : onceViews.some((v) => v.message_id === m.id && v.user_id === meId) ? (
+                            <span className="flex items-center gap-2 opacity-70">
+                              <Eye size={16} /> Opened
+                            </span>
                           ) : (
-                            <img src={m.media_url} alt="Attachment" loading="lazy" className="max-h-72 max-w-[220px] rounded-lg object-cover" />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void handleOpenOnce(m.id)
+                              }}
+                              disabled={openingOnce === m.id}
+                              className="flex items-center gap-2 font-semibold"
+                            >
+                              {openingOnce === m.id ? <Spinner size={14} /> : <Eye size={16} />} Photo · Tap to view once
+                            </button>
+                          )
+                        ) : m.media_url ? (
+                          brokenImages.has(m.id) ? (
+                            <span className="flex items-center gap-2 opacity-70">
+                              <ImageOff size={16} /> Couldn't load attachment
+                            </span>
+                          ) : m.media_type === 'video' ? (
+                            <video src={m.media_url} controls playsInline preload="metadata" className="max-h-72 max-w-[220px] rounded-lg" onClick={(e) => e.stopPropagation()} onError={() => setBrokenImages((s) => new Set(s).add(m.id))} />
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLightbox({ url: m.media_url!, type: 'image' })
+                              }}
+                              aria-label="Open photo"
+                              className="block"
+                            >
+                              <img
+                                src={m.media_url}
+                                alt="Attachment"
+                                loading="lazy"
+                                className="max-h-72 max-w-[220px] rounded-lg object-cover"
+                                onError={() => setBrokenImages((s) => new Set(s).add(m.id))}
+                              />
+                            </button>
                           )
                         ) : (
                           <span className="whitespace-pre-wrap">{m.content}</span>
@@ -543,10 +627,20 @@ export function ChatWindow({
         >
           {sendingMedia ? <Spinner size={20} /> : <ImageIcon size={22} />}
         </button>
+        <button
+          onClick={() => setViewOnceMode((v) => !v)}
+          aria-pressed={viewOnceMode}
+          aria-label="View once"
+          title={viewOnceMode ? 'View-once is on: your next photo can be opened once' : 'Send next photo as view-once'}
+          className={clsx('relative rounded-full p-2 hover:bg-paper-100 dark:hover:bg-ink-800', viewOnceMode && 'bg-signal-50 text-signal-500 dark:bg-ink-700')}
+        >
+          <Eye size={20} />
+          <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-ink-900 text-[9px] font-bold text-white dark:bg-paper-50 dark:text-ink-950">1</span>
+        </button>
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
+          accept={viewOnceMode ? 'image/jpeg,image/png,image/webp,image/gif' : 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime'}
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0]
@@ -572,6 +666,8 @@ export function ChatWindow({
           <Send size={20} />
         </button>
       </div>
+
+      {lightbox && <MediaLightbox url={lightbox.url} type={lightbox.type} note={lightbox.note} onClose={() => setLightbox(null)} />}
 
       <ConfirmDialog
         open={Boolean(confirmDeleteId)}

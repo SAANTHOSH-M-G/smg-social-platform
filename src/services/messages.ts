@@ -1,6 +1,6 @@
 import { supabase, BUCKETS } from '@/lib/supabase'
 import type { Conversation, Message, Profile } from '@/types'
-import { uploadToBucket } from './storage'
+import { uploadToBucket, uploadPrivateImage } from './storage'
 
 /**
  * supabase.channel(name) returns the SAME channel object for a repeated name, and adding
@@ -125,7 +125,21 @@ export async function sendTextMessage(conversationId: string, senderId: string, 
   return data as unknown as Message
 }
 
-export async function sendMediaMessage(conversationId: string, senderId: string, file: File): Promise<Message> {
+export async function sendMediaMessage(conversationId: string, senderId: string, file: File, viewOnce = false): Promise<Message> {
+  if (viewOnce) {
+    // private bucket: we store the storage path, never a public URL
+    const path = await uploadPrivateImage(BUCKETS.messageOnce, senderId, file)
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, sender_id: senderId, media_url: path, media_type: 'image', view_once: true })
+      .select('*, sender:profiles!messages_sender_id_fkey(*)')
+      .single()
+    if (error) {
+      await supabase.storage.from(BUCKETS.messageOnce).remove([path])
+      throw error
+    }
+    return data as unknown as Message
+  }
   const url = await uploadToBucket(BUCKETS.messages, senderId, file)
   const mediaType = file.type.startsWith('video/') ? ('video' as const) : ('image' as const)
   const { data, error } = await supabase
@@ -296,6 +310,38 @@ export function subscribeToReactions(onChange: (event: 'set' | 'remove', row: Me
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions' }, (p) => onChange('set', p.new as MessageReaction))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'message_reactions' }, (p) => onChange('set', p.new as MessageReaction))
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_reactions' }, (p) => onChange('remove', p.old as MessageReaction))
+    .subscribe()
+  return () => {
+    void supabase.removeChannel(channel)
+  }
+}
+
+// ---- view-once photos ----
+export interface OnceView {
+  message_id: string
+  user_id: string
+}
+
+/** Opens a view-once photo. Succeeds exactly once per recipient; returns a signed URL valid for 60 seconds. */
+export async function openViewOnce(messageId: string): Promise<string> {
+  const { data: path, error } = await supabase.rpc('open_view_once', { msg: messageId })
+  if (error) throw new Error(error.message || 'Could not open photo')
+  const { data, error: signError } = await supabase.storage.from(BUCKETS.messageOnce).createSignedUrl(path as string, 60)
+  if (signError || !data) throw new Error('Could not load photo')
+  return data.signedUrl
+}
+
+/** Opens by you (as recipient) and opens of your own photos (as sender). */
+export async function getOnceViews(messageIds: string[]): Promise<OnceView[]> {
+  if (!messageIds.length) return []
+  const { data } = await supabase.from('message_once_views').select('message_id, user_id').in('message_id', messageIds)
+  return (data ?? []) as OnceView[]
+}
+
+export function subscribeToOnceViews(onView: (row: OnceView) => void) {
+  const channel = supabase
+    .channel(topic('once-views'))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_once_views' }, (p) => onView(p.new as OnceView))
     .subscribe()
   return () => {
     void supabase.removeChannel(channel)

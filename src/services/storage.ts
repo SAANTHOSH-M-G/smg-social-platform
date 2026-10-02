@@ -79,6 +79,18 @@ export async function uploadToBucket(
   return data.publicUrl
 }
 
+/** Uploads into a PRIVATE bucket and returns the storage path (there is no public URL for these). */
+export async function uploadPrivateImage(bucket: string, userId: string, file: File) {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type) || !extensionMatches(file, ALLOWED_IMAGE_EXT)) {
+    throw new UploadValidationError('View-once only supports JPG, PNG, WEBP or GIF photos.')
+  }
+  if (file.size > MAX_IMAGE_BYTES) throw new UploadValidationError('Image is too large. Max size is 15MB.')
+  const path = `${userId}/${crypto.randomUUID()}.${extensionOf(file).toLowerCase()}`
+  const { error } = await supabase.storage.from(bucket).upload(path, file, { cacheControl: '0', upsert: false, contentType: file.type })
+  if (error) throw error
+  return path
+}
+
 /**
  * Grabs a frame partway into a video file and returns it as a JPEG File,
  * so reels get a real thumbnail instead of a black box. Falls back to

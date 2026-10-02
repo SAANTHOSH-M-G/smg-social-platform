@@ -36,4 +36,5 @@ export const BUCKETS = {
   stories: 'stories',
   messages: 'messages',
   audio: 'audio',
+  messageOnce: 'message_once',
 } as const

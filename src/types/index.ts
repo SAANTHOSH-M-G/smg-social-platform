@@ -144,6 +144,8 @@ export interface Message {
   content: string
   media_url: string | null
   media_type: MediaType | null
+  /** Photo that can be opened exactly once by the recipient; `media_url` is then a private storage path. */
+  view_once?: boolean
   created_at: string
   deleted_at: string | null
   sender?: Profile
