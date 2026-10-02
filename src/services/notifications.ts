@@ -39,7 +39,7 @@ export async function markOneRead(id: string) {
 
 export function subscribeToNotifications(userId: string, onInsert: () => void) {
   const channel = supabase
-    .channel(`notifications:${userId}`)
+    .channel(`notifications:${userId}:${crypto.randomUUID()}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${userId}` },

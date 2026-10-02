@@ -2,6 +2,13 @@ import { supabase, BUCKETS } from '@/lib/supabase'
 import type { Conversation, Message, Profile } from '@/types'
 import { uploadToBucket } from './storage'
 
+/**
+ * supabase.channel(name) returns the SAME channel object for a repeated name, and adding
+ * listeners to an already-subscribed channel throws. Several components subscribe to the
+ * same logical stream (and React StrictMode mounts twice), so every subscription gets its own topic.
+ */
+const topic = (base: string) => `${base}:${crypto.randomUUID()}`
+
 const MESSAGE_PAGE_SIZE = 40
 export const MAX_MESSAGE_LENGTH = 4000
 /** A presence row older than this is treated as offline even if is_online is still true (tab crashed, laptop closed). */
@@ -149,7 +156,7 @@ export function subscribeToConversation(
   handlers: { onInsert: (message: Message) => void; onUpdate?: (message: Message) => void }
 ) {
   const channel = supabase
-    .channel(`messages:${conversationId}`)
+    .channel(topic(`messages:${conversationId}`))
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
@@ -173,7 +180,7 @@ export function subscribeToConversation(
  */
 export function subscribeToInbox(userId: string, onChange: () => void) {
   const channel = supabase
-    .channel(`inbox:${userId}`)
+    .channel(topic(`inbox:${userId}`))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, onChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_members' }, onChange)
     .subscribe()
@@ -185,7 +192,7 @@ export function subscribeToInbox(userId: string, onChange: () => void) {
 /** Live read receipts for one conversation. */
 export function subscribeToReadReceipts(conversationId: string, userId: string, onOtherRead: (lastReadAt: string) => void) {
   const channel = supabase
-    .channel(`reads:${conversationId}`)
+    .channel(topic(`reads:${conversationId}`))
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'conversation_members', filter: `conversation_id=eq.${conversationId}` },
@@ -202,7 +209,7 @@ export function subscribeToReadReceipts(conversationId: string, userId: string, 
 
 export function subscribeToTyping(conversationId: string, userId: string, onTyping: (typingUserId: string) => void) {
   const channel = supabase
-    .channel(`typing:${conversationId}`)
+    .channel(topic(`typing:${conversationId}`))
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'typing_status', filter: `conversation_id=eq.${conversationId}` },
@@ -247,7 +254,7 @@ export function isPresenceLive(row?: PresenceRow | null) {
 
 export function subscribeToPresence(userId: string, onChange: (row: PresenceRow) => void) {
   const channel = supabase
-    .channel(`presence:${userId}`)
+    .channel(topic(`presence:${userId}`))
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'presence', filter: `user_id=eq.${userId}` },
