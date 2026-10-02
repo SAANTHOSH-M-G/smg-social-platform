@@ -1,0 +1,72 @@
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '@/contexts/AuthContext'
+import { Spinner } from '@/components/Common'
+
+export function LoginPage() {
+  const { signIn } = useAuth()
+  const navigate = useNavigate()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      await signIn(email, password)
+      navigate('/')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not log in')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="w-full max-w-sm rounded-2xl border border-paper-200 bg-white p-8 shadow-soft dark:border-ink-700 dark:bg-ink-900">
+      <h1 className="mb-1 text-center font-display text-lg font-semibold text-ink-500 dark:text-paper-200">
+        Log in to see photos and videos from your friends.
+      </h1>
+      <form onSubmit={handleSubmit} className="mt-6 space-y-3">
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+          className="w-full rounded-lg border border-paper-200 bg-paper-50 p-3 text-sm outline-none focus:border-signal-400 dark:border-ink-700 dark:bg-ink-800"
+        />
+        <input
+          type="password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          className="w-full rounded-lg border border-paper-200 bg-paper-50 p-3 text-sm outline-none focus:border-signal-400 dark:border-ink-700 dark:bg-ink-800"
+        />
+        {error && <p className="text-xs font-medium text-ember-500">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-signal-500 py-2.5 text-sm font-semibold text-white hover:bg-signal-600 disabled:opacity-60"
+        >
+          {loading && <Spinner size={16} />} Log in
+        </button>
+      </form>
+      <p className="mt-6 text-center text-sm">
+        Don't have an account?{' '}
+        <Link to="/signup" className="font-semibold text-signal-500">
+          Sign up
+        </Link>
+      </p>
+      <p className="mt-2 text-center text-sm">
+        <Link to="/forgot-password" className="font-semibold text-signal-500">
+          Forgot password?
+        </Link>
+      </p>
+    </div>
+  )
+}

@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-paper-50 text-ink-900 antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+.dark body {
+  @apply bg-ink-950 text-paper-100;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120,120,130,0.35) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: rgba(120,120,130,0.35); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.brand-wordmark {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(120,120,130,0.08) 25%, rgba(120,120,130,0.18) 37%, rgba(120,120,130,0.08) 63%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.story-ring {
+  background: conic-gradient(from 45deg, #4F5EF0, #9AA6FF, #FF6B6B, #4F5EF0);
+}
+.story-ring-seen {
+  background: #C9CAD1;
+}
+.dark .story-ring-seen {
+  background: #34363F;
+}
