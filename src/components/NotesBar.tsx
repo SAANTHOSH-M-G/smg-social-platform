@@ -65,13 +65,13 @@ export function NotesBar() {
   }
 
   return (
-    <div className="border-b border-paper-200 px-4 py-3 dark:border-ink-700">
-      <div className="no-scrollbar flex gap-4 overflow-x-auto">
+    <div className="border-b border-paper-200 px-4 pb-3 pt-1 dark:border-ink-700">
+      <div className="no-scrollbar flex gap-4 overflow-x-auto pb-1 pt-6">
         <button onClick={() => setComposerOpen(true)} className="flex w-16 shrink-0 flex-col items-center gap-1.5">
           <div className="relative">
             <Avatar src={profile.avatar_url} name={profile.full_name || profile.username} size="md" />
             {myNote ? (
-              <span className="absolute -top-2 left-1/2 w-20 -translate-x-1/2 truncate rounded-full border border-paper-200 bg-white px-2 py-0.5 text-center text-[10px] font-medium shadow-sm dark:border-ink-700 dark:bg-ink-800">
+              <span className="absolute -top-5 left-1/2 w-[76px] -translate-x-1/2 truncate rounded-full border border-paper-200 bg-white px-2 py-0.5 text-center text-[10px] font-medium shadow-sm dark:border-ink-700 dark:bg-ink-800">
                 {myNote.content}
               </span>
             ) : (
@@ -90,7 +90,7 @@ export function NotesBar() {
               <button key={note.user_id} onClick={() => setActiveNote(note)} className="flex w-16 shrink-0 flex-col items-center gap-1.5">
                 <div className="relative">
                   <Avatar src={note.author.avatar_url} name={note.author.full_name || note.author.username} size="md" />
-                  <span className="absolute -top-2 left-1/2 w-20 -translate-x-1/2 truncate rounded-full border border-paper-200 bg-white px-2 py-0.5 text-center text-[10px] font-medium shadow-sm dark:border-ink-700 dark:bg-ink-800">
+                  <span className="absolute -top-5 left-1/2 w-[76px] -translate-x-1/2 truncate rounded-full border border-paper-200 bg-white px-2 py-0.5 text-center text-[10px] font-medium shadow-sm dark:border-ink-700 dark:bg-ink-800">
                     {note.content}
                   </span>
                 </div>

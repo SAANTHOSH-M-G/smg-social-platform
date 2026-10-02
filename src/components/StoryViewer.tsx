@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, Trash2, Eye, Heart, Send, Link2, Pause, Play, Volume2, VolumeX, Plus, AlertCircle } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Trash2, Eye, Heart, Send, Pause, Play, Volume2, VolumeX, Plus, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
 import { Avatar } from './Avatar'
 import { Spinner } from './Common'
@@ -306,23 +306,56 @@ export function StoryViewer({
 
   const stop = (e: React.SyntheticEvent) => e.stopPropagation()
 
+  const prevGroup = groups[pos.g - 1]
+  const nextGroup = groups[pos.g + 1]
+
+  // faded neighbour story on each side (desktop), click to jump to that person's stories
+  const peek = (g: StoryGroup | undefined, index: number, side: 'left' | 'right') => {
+    if (!g) return <div className="hidden w-44 shrink-0 lg:block" />
+    const cover = g.stories[0]
+    return (
+      <button
+        onClick={() => setPos({ g: index, s: 0 })}
+        aria-label={`${side === 'left' ? 'Previous' : 'Next'} story: ${g.author.username}`}
+        className="group relative hidden h-[52vh] w-44 shrink-0 overflow-hidden rounded-xl bg-ink-800 opacity-60 transition-opacity hover:opacity-90 lg:block"
+      >
+        {cover.media_type === 'image' ? (
+          <img src={cover.media_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-signal-600 to-ink-800" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
+        <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-3 text-white">
+          <Avatar src={g.author.avatar_url} name={g.author.full_name || g.author.username} size="sm" />
+          <span className="truncate text-xs font-semibold">{g.author.username}</span>
+        </div>
+      </button>
+    )
+  }
+
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black" role="dialog" aria-modal="true" aria-label={`${group.author.username}'s story`}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center gap-4 bg-ink-950/95 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${group.author.username}'s story`}>
       <button onClick={onClose} aria-label="Close story" className="absolute right-3 top-3 z-30 hidden rounded-full p-2 text-white/90 hover:bg-white/10 sm:block">
         <X size={26} />
       </button>
 
-      <button onClick={goPrev} aria-label="Previous story" className="absolute left-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 sm:block">
-        <ChevronLeft size={26} />
+      <button onClick={goPrev} aria-label="Previous story" className="absolute left-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/15 p-2 text-white hover:bg-white/25 sm:block lg:left-[calc(50%-390px)]">
+        <ChevronLeft size={22} />
       </button>
-      <button onClick={goNext} aria-label="Next story" className="absolute right-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 sm:block">
-        <ChevronRight size={26} />
+      <button onClick={goNext} aria-label="Next story" className="absolute right-3 top-1/2 z-30 hidden -translate-y-1/2 rounded-full bg-white/15 p-2 text-white hover:bg-white/25 sm:block lg:right-[calc(50%-390px)]">
+        <ChevronRight size={22} />
       </button>
 
-      <div className="relative flex h-[100dvh] w-full max-w-[460px] flex-col overflow-hidden bg-ink-950 sm:h-[94vh] sm:rounded-xl">
+      {peek(prevGroup, pos.g - 1, 'left')}
+
+      {/* the story card */}
+      <div className="relative h-[100dvh] w-full overflow-hidden bg-black sm:h-[94vh] sm:w-auto sm:max-w-[min(460px,100vw)] sm:aspect-[9/16] sm:rounded-2xl">
+        {/* blurred copy of the photo fills any letterbox space */}
+        {!isVideo && !mediaError && <img src={story.media_url} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl" />}
+
         {/* media + gesture surface */}
         <div
-          className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center bg-ink-950"
+          className="absolute inset-0 touch-none select-none"
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onPointerCancel={endHold}
@@ -353,7 +386,7 @@ export function StoryViewer({
               src={story.media_url}
               alt={story.caption || `Story by ${group.author.username}`}
               draggable={false}
-              className="h-full w-full object-contain"
+              className="relative h-full w-full object-contain"
               onLoad={() => setMediaLoading(false)}
               onError={() => {
                 setMediaLoading(false)
@@ -386,7 +419,7 @@ export function StoryViewer({
         </div>
 
         {/* top overlay: progress segments + author */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/60 to-transparent px-2 pb-8 pt-2">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/60 via-black/20 to-transparent px-3 pb-10 pt-3">
           <div className="flex gap-1" role="progressbar" aria-valuemin={0} aria-valuemax={group.stories.length} aria-valuenow={pos.s + 1} aria-label="Story progress">
             {group.stories.map((s, i) => (
               <div key={s.id} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30">
@@ -394,73 +427,73 @@ export function StoryViewer({
               </div>
             ))}
           </div>
-          <div className="pointer-events-auto mt-2.5 flex items-center gap-2 text-white" onPointerDown={stop} onPointerUp={stop}>
+          <div className="pointer-events-auto mt-3 flex items-center gap-2 text-white">
             <Avatar src={group.author.avatar_url} name={group.author.full_name || group.author.username} size="sm" />
-            <span className="text-sm font-semibold drop-shadow">{group.author.username}</span>
-            <span className="text-xs text-white/70">{timeAgo(story.created_at)}</span>
-            <div className="ml-auto flex items-center gap-0.5">
+            <span className="truncate text-sm font-semibold drop-shadow">{group.author.username}</span>
+            <span className="shrink-0 text-xs text-white/70">{timeAgo(story.created_at)}</span>
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {isOwn && onAddStory && (
-                <button onClick={onAddStory} aria-label="Add to your story" title="Add to your story" className="rounded-full p-1.5 hover:bg-white/10">
+                <button onClick={onAddStory} aria-label="Add to your story" title="Add to your story" className="rounded-full p-1.5 hover:bg-white/15">
                   <Plus size={20} />
                 </button>
               )}
-              <button onClick={() => setManualPause((p) => !p)} aria-label={manualPause ? 'Resume' : 'Pause'} title={manualPause ? 'Resume' : 'Pause'} className="rounded-full p-1.5 hover:bg-white/10">
-                {manualPause ? <Play size={18} /> : <Pause size={18} />}
+              <button onClick={() => setManualPause((p) => !p)} aria-label={manualPause ? 'Resume' : 'Pause'} title={manualPause ? 'Resume' : 'Pause'} className="rounded-full p-1.5 hover:bg-white/15">
+                {manualPause ? <Play size={18} className="fill-current" /> : <Pause size={18} className="fill-current" />}
               </button>
               {isVideo && (
-                <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} title={muted ? 'Unmute' : 'Mute'} className="rounded-full p-1.5 hover:bg-white/10">
+                <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} title={muted ? 'Unmute' : 'Mute'} className="rounded-full p-1.5 hover:bg-white/15">
                   {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
               )}
               {isOwn && (
-                <button onClick={() => setConfirmDelete(true)} aria-label="Delete story" title="Delete story" className="rounded-full p-1.5 hover:bg-white/10">
+                <button onClick={() => setConfirmDelete(true)} aria-label="Delete story" title="Delete story" className="rounded-full p-1.5 hover:bg-white/15">
                   <Trash2 size={18} />
                 </button>
               )}
-              <button onClick={onClose} aria-label="Close story" className="rounded-full p-1.5 hover:bg-white/10 sm:hidden">
+              <button onClick={onClose} aria-label="Close story" className="rounded-full p-1.5 hover:bg-white/15 sm:hidden">
                 <X size={22} />
               </button>
             </div>
           </div>
         </div>
 
-        {story.caption && <div className="bg-ink-950 px-4 py-2 text-center text-sm text-white/90 [overflow-wrap:anywhere]">{story.caption}</div>}
+        {/* bottom overlay: caption + reply / activity */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-14">
+          {story.caption && <p className="pointer-events-auto mb-3 text-sm text-white [overflow-wrap:anywhere] [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]">{story.caption}</p>}
 
-        {isOwn ? (
-          <button onClick={openViewers} className="flex items-center gap-2 bg-ink-950 px-4 py-3 text-sm text-white/80 hover:text-white">
-            <Eye size={16} /> View activity
-            {likeCount > 0 && (
-              <span className="ml-auto flex items-center gap-1 text-ember-400">
-                <Heart size={14} className="fill-current" /> {likeCount}
-              </span>
-            )}
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 bg-ink-950 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <input
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              onKeyDown={(e) => e.key === 'Enter' && handleReply()}
-              placeholder={`Reply to ${group.author.username}…`}
-              aria-label="Reply to story"
-              className="min-w-0 flex-1 rounded-full border border-white/20 bg-transparent px-4 py-2 text-sm text-white outline-none placeholder:text-white/50"
-            />
-            <button onClick={handleLike} disabled={!profile} aria-label={liked ? 'Unlike story' : 'Like story'} className="shrink-0 text-white hover:text-ember-400">
-              <Heart size={24} className={clsx(liked && 'fill-ember-500 text-ember-500')} />
+          {isOwn ? (
+            <button onClick={openViewers} className="pointer-events-auto flex items-center gap-2 text-sm text-white/90 hover:text-white">
+              <Eye size={16} /> View activity
+              {likeCount > 0 && (
+                <span className="ml-3 flex items-center gap-1 text-ember-400">
+                  <Heart size={14} className="fill-current" /> {likeCount}
+                </span>
+              )}
             </button>
-            <button onClick={handleShare} aria-label="Copy story link" className="shrink-0 text-white hover:text-white/70">
-              <Link2 size={22} />
-            </button>
-            {replyText.trim() && (
-              <button onClick={handleReply} disabled={sendingReply} aria-label="Send reply" className="shrink-0 text-signal-400 disabled:opacity-50">
-                <Send size={22} />
+          ) : (
+            <div className="pointer-events-auto flex items-center gap-3">
+              <input
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                onKeyDown={(e) => e.key === 'Enter' && handleReply()}
+                placeholder={`Reply to ${group.author.username}…`}
+                aria-label="Reply to story"
+                className="min-w-0 flex-1 rounded-full border border-white/50 bg-black/20 px-4 py-2.5 text-sm text-white outline-none backdrop-blur-sm placeholder:text-white/70 focus:border-white"
+              />
+              <button onClick={handleLike} disabled={!profile} aria-label={liked ? 'Unlike story' : 'Like story'} className="shrink-0 text-white transition-transform active:scale-90">
+                <Heart size={26} className={clsx(liked && 'fill-ember-500 text-ember-500')} />
               </button>
-            )}
-          </div>
-        )}
+              <button onClick={replyText.trim() ? handleReply : handleShare} disabled={sendingReply} aria-label={replyText.trim() ? 'Send reply' : 'Copy story link'} className="shrink-0 text-white disabled:opacity-50">
+                <Send size={24} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {peek(nextGroup, pos.g + 1, 'right')}
 
       {showViewers && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setShowViewers(false)}>
