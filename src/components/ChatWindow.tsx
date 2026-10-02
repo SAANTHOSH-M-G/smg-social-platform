@@ -298,9 +298,9 @@ export function ChatWindow({
     })
     try {
       await setReaction(messageId, meId, next)
-    } catch {
+    } catch (e) {
       setReactions(snapshot)
-      showToast('Could not react to message', 'error')
+      showToast(e instanceof Error ? `Could not react: ${e.message}` : 'Could not react to message', 'error')
     }
   }
 

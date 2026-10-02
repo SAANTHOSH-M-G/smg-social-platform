@@ -284,15 +284,9 @@ export async function getReactions(messageIds: string[]): Promise<MessageReactio
 
 /** Pass `emoji = null` to remove your reaction; picking a different emoji replaces it. */
 export async function setReaction(messageId: string, userId: string, emoji: string | null) {
-  if (emoji === null) {
-    const { error } = await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', userId)
-    if (error) throw error
-    return
-  }
-  const { error } = await supabase
-    .from('message_reactions')
-    .upsert({ message_id: messageId, user_id: userId, emoji }, { onConflict: 'message_id,user_id' })
-  if (error) throw error
+  // Goes through a SECURITY DEFINER function (migration 006) that verifies you are in the conversation.
+  const { error } = await supabase.rpc('set_message_reaction', { msg: messageId, reaction: emoji })
+  if (error) throw new Error(error.message || 'Could not react to message')
 }
 
 /** RLS limits the stream to messages in your own conversations; callers ignore ids they don't show. */
