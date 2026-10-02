@@ -48,6 +48,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
   const [shareOpen, setShareOpen] = useState(false)
   const [likeBurst, setLikeBurst] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const mediaRef = useRef<HTMLDivElement>(null)
   useOnClickOutside(menuRef, () => setMenuOpen(false))
 
   const isOwn = profile?.id === post.user_id
@@ -173,7 +174,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
         </div>
       </div>
 
-      <div className="relative aspect-square w-full select-none bg-ink-950/5" onDoubleClick={handleLike}>
+      <div ref={mediaRef} className="relative aspect-square w-full select-none bg-ink-950/5" onDoubleClick={handleLike}>
         {media?.media_type === 'video' ? (
           <video src={media.media_url} className="h-full w-full object-cover" controls playsInline />
         ) : (
@@ -227,7 +228,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
       <div className="space-y-1 px-3.5 pt-1 text-sm">
         {post.audio_url && (
           <div className="pb-0.5">
-            <AudioTrackPlayer url={post.audio_url} title={post.audio_title} compact />
+            <AudioTrackPlayer url={post.audio_url} title={post.audio_artist ? `${post.audio_title} · ${post.audio_artist}` : post.audio_title} compact watchRef={mediaRef} />
           </div>
         )}
         <p className="font-semibold">{formatCount(post.like_count)} likes</p>
