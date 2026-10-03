@@ -194,7 +194,7 @@ export function PostCard({ post, onChange, onDeleted }: { post: Post; onChange?:
         </div>
       </div>
 
-      <div ref={mediaRef} className="relative aspect-square w-full select-none bg-ink-950/5" onDoubleClick={handleLike}>
+      <div ref={mediaRef} className={clsx('relative w-full select-none bg-ink-950/5', post.is_reel ? 'aspect-[4/5]' : 'aspect-square')} onDoubleClick={handleLike}>
         {media?.media_type === 'video' ? (
           <FeedVideo postId={post.id} src={media.media_url} poster={post.cover_url} hasMusic={Boolean(post.audio_url)} onBlockedChange={setSoundBlocked} />
         ) : (

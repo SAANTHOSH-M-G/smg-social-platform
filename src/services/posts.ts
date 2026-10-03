@@ -55,7 +55,6 @@ export async function getFeed(viewerId: string, page = 0, pageSize = 6): Promise
   const { data, error } = await supabase
     .from('posts')
     .select(POST_SELECT)
-    .eq('is_reel', false)
     .in('user_id', authorIds.length ? authorIds : [viewerId])
     .order('created_at', { ascending: false })
     .range(from, to)
@@ -68,7 +67,6 @@ export async function getFeed(viewerId: string, page = 0, pageSize = 6): Promise
     const { data: extra } = await supabase
       .from('posts')
       .select(POST_SELECT)
-      .eq('is_reel', false)
       .not('user_id', 'in', `(${authorIds.join(',') || viewerId})`)
       .order('like_count', { ascending: false })
       .limit(pageSize - posts.length)
