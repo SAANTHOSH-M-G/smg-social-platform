@@ -64,7 +64,7 @@ export function PostModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-0 sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-0 sm:p-6" onClick={onClose} role="dialog" aria-modal="true" aria-label="Post">
       <button onClick={onClose} className="absolute right-4 top-4 z-10 text-white hover:opacity-80">
         <X size={28} />
       </button>

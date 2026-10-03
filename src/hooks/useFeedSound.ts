@@ -43,6 +43,31 @@ export function useFeedSound(): [boolean, (on: boolean) => void] {
   return [on, setFeedSound]
 }
 
+// ---- feed media is suspended while any dialog/overlay is open (story viewer, post popup, lightbox...) ----
+let suspended = false
+const suspendListeners = new Set<(s: boolean) => void>()
+
+export const isFeedSuspended = () => suspended
+
+export function onFeedSuspendChange(cb: (suspended: boolean) => void) {
+  suspendListeners.add(cb)
+  return () => {
+    suspendListeners.delete(cb)
+  }
+}
+
+if (typeof document !== 'undefined') {
+  // Overlays are portalled straight into <body> with role="dialog" / "alertdialog".
+  const check = () => {
+    const next = document.querySelector('body > [role="dialog"], body > [role="alertdialog"]') !== null
+    if (next === suspended) return
+    suspended = next
+    if (next) registry.forEach((_, el) => el.pause())
+    suspendListeners.forEach((l) => l(next))
+  }
+  new MutationObserver(check).observe(document.body, { childList: true })
+}
+
 // ---- only one post plays at a time ----
 const registry = new Map<HTMLMediaElement, string>()
 

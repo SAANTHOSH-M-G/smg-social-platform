@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useFeedSound, registerMedia, claimPlayback } from '@/hooks/useFeedSound'
+import { useFeedSound, registerMedia, claimPlayback, isFeedSuspended, onFeedSuspendChange } from '@/hooks/useFeedSound'
 
 const VISIBLE_RATIO = 0.6
 
@@ -35,9 +35,10 @@ export function FeedVideo({
     onBlockedChange?.(b)
   }
 
-  const play = async () => {
+  const play = async (force = false) => {
     const v = ref.current
     if (!v) return
+    if (isFeedSuspended() && !force) return // an overlay (story, popup...) is on top
     claimPlayback(postId)
     const wantSound = soundRef.current && !hasMusic
     v.muted = !wantSound
@@ -79,11 +80,15 @@ export function FeedVideo({
       if (document.visibilityState === 'hidden') v.pause()
       else if (inView.current && !userPaused.current) void play()
     }
+    const offSuspend = onFeedSuspendChange((s) => {
+      if (!s && inView.current && !userPaused.current) void play()
+    })
     const gestures = ['pointerdown', 'keydown', 'touchend'] as const
     gestures.forEach((g) => window.addEventListener(g, onGesture))
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
       unregister()
+      offSuspend()
       observer.disconnect()
       gestures.forEach((g) => window.removeEventListener(g, onGesture))
       document.removeEventListener('visibilitychange', onVisibility)
@@ -116,10 +121,10 @@ export function FeedVideo({
       onClick={() => {
         const v = ref.current
         if (!v) return
-        if (blocked.current) return void play() // that tap is the gesture that turns sound on
+        if (blocked.current) return void play(true) // that tap is the gesture that turns sound on
         if (v.paused) {
           userPaused.current = false
-          void play()
+          void play(true)
         } else {
           userPaused.current = true
           v.pause()

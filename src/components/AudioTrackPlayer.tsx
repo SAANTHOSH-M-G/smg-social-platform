@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Play, Pause, Music2, Volume2, VolumeX } from 'lucide-react'
 import clsx from 'clsx'
-import { useFeedSound, getFeedSound, setFeedSound, registerMedia, claimPlayback } from '@/hooks/useFeedSound'
+import { useFeedSound, getFeedSound, setFeedSound, registerMedia, claimPlayback, isFeedSuspended, onFeedSuspendChange } from '@/hooks/useFeedSound'
 
 const VISIBLE_RATIO = 0.6
 
@@ -47,9 +47,10 @@ export function AudioTrackPlayer({
     onBlockedChange?.(b)
   }
 
-  const play = async () => {
+  const play = async (force = false) => {
     const audio = audioRef.current
     if (!audio) return
+    if (isFeedSuspended() && !force) return // an overlay (story, popup...) is on top
     claimPlayback(group)
     audio.muted = !getFeedSound()
     try {
@@ -95,12 +96,16 @@ export function AudioTrackPlayer({
       if (document.visibilityState === 'hidden') pause()
       else if (inViewRef.current && !userPausedRef.current) void play()
     }
+    const offSuspend = onFeedSuspendChange((s) => {
+      if (!s && inViewRef.current && !userPausedRef.current && document.visibilityState === 'visible') void play()
+    })
     const gestures = ['pointerdown', 'keydown', 'touchend'] as const
     gestures.forEach((g) => window.addEventListener(g, onGesture))
     document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
       unregister()
+      offSuspend()
       observer?.disconnect()
       gestures.forEach((g) => window.removeEventListener(g, onGesture))
       document.removeEventListener('visibilitychange', onVisibility)
@@ -124,7 +129,7 @@ export function AudioTrackPlayer({
       pause()
     } else {
       userPausedRef.current = false
-      void play()
+      void play(true)
     }
   }
 
